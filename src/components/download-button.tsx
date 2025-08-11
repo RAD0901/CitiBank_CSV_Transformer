@@ -10,6 +10,7 @@ type Props = {
   onRetry?: () => void
   onClick?: () => void
   label?: string
+  className?: string
 }
 
 export default function DownloadButton({
@@ -18,6 +19,7 @@ export default function DownloadButton({
   onRetry = () => {},
   onClick = () => {},
   label = "Download",
+  className = "",
 }: Props) {
   const isLoading = status === "downloading"
   const isError = status === "error"
@@ -32,7 +34,8 @@ export default function DownloadButton({
         "relative overflow-hidden gap-2",
         isSuccess
           ? "bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-600"
-          : "bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-600"
+          : "bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-600",
+        className
       )}
       aria-live="polite"
     >

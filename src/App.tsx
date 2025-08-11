@@ -329,10 +329,8 @@ function App() {
                         status="idle"
                         label="Download Converted CSV"
                         onClick={handleDownload}
+                        className="flex-1"
                       />
-                      <Button onClick={handleDownload} className="flex-1">
-                        Download CSV
-                      </Button>
                       <Button onClick={reset} variant="outline">
                         Process Another File
                       </Button>
