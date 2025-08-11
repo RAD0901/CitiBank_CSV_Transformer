@@ -8,6 +8,7 @@ type Props = {
   status?: "idle" | "downloading" | "success" | "error"
   progress?: number
   onRetry?: () => void
+  onClick?: () => void
   label?: string
 }
 
@@ -15,6 +16,7 @@ export default function DownloadButton({
   status = "idle",
   progress = 0,
   onRetry = () => {},
+  onClick = () => {},
   label = "Download",
 }: Props) {
   const isLoading = status === "downloading"
@@ -24,7 +26,7 @@ export default function DownloadButton({
   return (
     <Button
       type="button"
-      onClick={isError ? onRetry : undefined}
+      onClick={isError ? onRetry : onClick}
       disabled={isLoading}
       className={cn(
         "relative overflow-hidden gap-2",

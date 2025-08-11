@@ -328,7 +328,7 @@ function App() {
                       <DownloadButton
                         status="idle"
                         label="Download Converted CSV"
-                        onRetry={handleDownload}
+                        onClick={handleDownload}
                       />
                       <Button onClick={handleDownload} className="flex-1">
                         Download CSV
