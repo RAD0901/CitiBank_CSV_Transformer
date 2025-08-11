@@ -13,8 +13,8 @@ import DownloadButton from "./components/download-button";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { useCSVProcessor } from './hooks/useCSVProcessor';
-import { useSettings } from './hooks/useSettings';
-import { useHistory } from './hooks/useHistory';
+// import { useSettings } from './hooks/useSettings';
+// import { useHistory } from './hooks/useHistory';
 import { generateOutputCSV, downloadCSV } from './utils/csvTransformer';
 import './App.css';
 
@@ -32,8 +32,8 @@ function App() {
   const errorRef = useRef<HTMLDivElement | null>(null);
   const proceedButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  const { settings, generateFilename } = useSettings();
-  const { addSession } = useHistory();
+  // const { generateFilename } = useSettings();
+  // const { addSession } = useHistory();
 
   const {
     processFile,

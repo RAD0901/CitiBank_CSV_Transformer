@@ -112,11 +112,16 @@ npm run build
 npm run preview
 ```
 
-### Deployment to GitHub Pages
+### Deployment to Netlify
 ```bash
-# Deploy to GitHub Pages
-npm run deploy
+# Build the application
+npm run build
+
+# Or deploy automatically via GitHub integration
+# See NETLIFY_DEPLOYMENT.md for complete deployment guide
 ```
+
+For detailed deployment instructions, see **[NETLIFY_DEPLOYMENT.md](./NETLIFY_DEPLOYMENT.md)**
 
 ## 🎨 UI Components
 
