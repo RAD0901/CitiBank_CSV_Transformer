@@ -146,6 +146,16 @@ function App() {
     return currentStep;
   }, [currentStep, isProcessing, isComplete, result]);
 
+  const trackerProgress = useMemo(() => {
+    if (isProcessing) {
+      return progress.percentage;
+    }
+    if (isComplete) {
+      return 100;
+    }
+    return 0;
+  }, [isProcessing, isComplete, progress.percentage]);
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10 sm:px-6 lg:px-8">
@@ -184,7 +194,7 @@ function App() {
                     {displayStep === 4 && "Processing complete!"}
                   </p>
                 </div>
-                <ProgressIndicator current={displayStep} total={4} />
+                <ProgressIndicator value={trackerProgress} label="Progress" />
               </div>
 
         {/* Step 1: File Upload */}
