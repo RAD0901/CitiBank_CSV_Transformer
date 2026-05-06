@@ -22,7 +22,7 @@ A modern web application that converts CitiBank CSV export files into the format
 
 ### Data Transformation Details
 
-**Input Format (CitiBank CSV):**
+**Input Format (CitiBank CSV, legacy):**
 ```
 Search Criteria: ,,,
 From Date: ,07/10/2025,,
@@ -34,6 +34,13 @@ Account Number,Value Date,Customer Reference,Amount
 2987066,07/31/2025,20950P1FR2O," -88,433.98"
 ```
 
+**Input Format (CitiBank CSV, new):**
+```
+Value Date,Statement Date,Currency,Amount,Beneficiary/ Remitter,Customer Reference,Type,Bank Reference,Description
+04/17/2025,04/17/2025,ZAR,'-5000000,,820 0201523001,DE-Data Entry,3935930991,TARGET BALANCING SWEEP (EOD)
+04/17/2025,04/17/2025,ZAR,5000000,(CS)QPP50004S10736493331,FSK ELECTRAMECOR,FT-Funds Transfer,5107029424,INCOMING CLEARING TRANSFER
+```
+
 **Output Format (Sage Bank Manager):**
 ```
 Date,Description,Amount
@@ -42,11 +49,17 @@ Date,Description,Amount
 ```
 
 ### Transformation Rules
-1. **Skip Metadata**: Ignore first 5 lines (Search Criteria, dates, account info, blank line)
-2. **Date Format**: Convert MM/DD/YYYY → DD/MM/YYYY
-3. **Amount Cleaning**: Remove quotes, spaces, commas → preserve decimal precision
-4. **Description**: Use Customer Reference field, trim whitespace
-5. **Remove**: Account Number column (not needed in output)
+1. **Dual Format Support**: Detect and process either legacy or new CitiBank export headers.
+2. **Metadata Handling**: Skip metadata rows when present in legacy exports.
+3. **Date Source**:
+   - Legacy format: use `Value Date`
+   - New format: use `Statement Date`
+4. **Date Format Output**: Convert `M/D/YYYY` or `MM/DD/YYYY` to `DD/MM/YYYY`.
+5. **Amount Cleaning**: Remove quotes, apostrophes, spaces, commas and preserve numeric sign/precision as string.
+6. **Description Mapping (new format)**:
+   - Payments (negative amount): use `Beneficiary/ Remitter`; if blank, use `Description`
+   - Receipts/Deposits (positive/zero amount): use `Customer Reference`
+7. **Legacy Description Mapping**: continue using `Customer Reference`.
 
 ## 🏗️ Technical Architecture
 
@@ -137,13 +150,15 @@ The application uses modern UI components with:
 ### File Validation
 - Must be .csv extension
 - Maximum 10MB file size
-- Must contain "Account Number" header row
+- Must contain either supported legacy or new CitiBank headers
 - Minimum 1 transaction row required
 
 ### Data Validation
-- Date format validation (MM/DD/YYYY)
+- Date format validation (`M/D/YYYY` and `MM/DD/YYYY`)
 - Amount must be numeric after cleaning
 - Handle missing or malformed data gracefully
+- For new format payment rows, description source must exist (`Beneficiary/ Remitter` or `Description`)
+- For new format receipt/deposit rows, `Customer Reference` is required
 
 ### Error Recovery
 - Clear error messages with suggested fixes

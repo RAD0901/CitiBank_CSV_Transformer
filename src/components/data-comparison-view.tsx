@@ -15,9 +15,12 @@ import { Button } from "../components/ui/button"
 import { Maximize2 } from 'lucide-react'
 
 type OriginalRow = {
-  "Account Number": string
-  "Value Date": string
-  "Customer Reference": string
+  "Account Number"?: string
+  "Value Date"?: string
+  "Statement Date"?: string
+  "Beneficiary/ Remitter"?: string
+  "Customer Reference"?: string
+  "Description"?: string
   "Amount": string
 }
 
@@ -53,7 +56,7 @@ export default function DataComparisonView({
       // Date normalized
       changed["Value Date"] = true
       // Description from Customer Reference
-      if (o["Customer Reference"].trim() !== t.Description.trim()) {
+      if ((o["Customer Reference"] ?? "").trim() !== t.Description.trim()) {
         changed["Customer Reference"] = true
       }
       // Amount string vs integer cents
@@ -63,7 +66,7 @@ export default function DataComparisonView({
   }, [originalRows, transformedRows])
 
   const changedTransformed = useMemo(() => {
-    return transformedRows.map((_t, _idx) => {
+    return transformedRows.map(() => {
       const changed: Record<string, boolean> = {}
       changed["Date"] = true
       changed["Description"] = true
@@ -72,12 +75,22 @@ export default function DataComparisonView({
     })
   }, [transformedRows])
 
-  const originalCols: Column<OriginalRow>[] = [
-    { key: "Account Number", header: "Account Number", width: "w-[160px]" },
-    { key: "Value Date", header: "Value Date", width: "w-[120px]" },
-    { key: "Customer Reference", header: "Customer Reference", width: "min-w-[220px]" },
-    { key: "Amount", header: "Amount", align: "right", width: "w-[120px]" },
-  ]
+  const hasNewSchemaColumns = originalRows.some(row => row["Statement Date"] !== undefined)
+  const originalCols: Column<OriginalRow>[] = hasNewSchemaColumns
+    ? [
+        { key: "Value Date", header: "Value Date", width: "w-[120px]" },
+        { key: "Statement Date", header: "Statement Date", width: "w-[120px]" },
+        { key: "Beneficiary/ Remitter", header: "Beneficiary/ Remitter", width: "min-w-[220px]" },
+        { key: "Customer Reference", header: "Customer Reference", width: "min-w-[220px]" },
+        { key: "Description", header: "Description", width: "min-w-[220px]" },
+        { key: "Amount", header: "Amount", align: "right", width: "w-[120px]" },
+      ]
+    : [
+        { key: "Account Number", header: "Account Number", width: "w-[160px]" },
+        { key: "Value Date", header: "Value Date", width: "w-[120px]" },
+        { key: "Customer Reference", header: "Customer Reference", width: "min-w-[220px]" },
+        { key: "Amount", header: "Amount", align: "right", width: "w-[120px]" },
+      ]
 
   const transformedCols: Column<TransformedRow>[] = [
     { key: "Date", header: "Date", width: "w-[120px]" },

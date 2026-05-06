@@ -6,6 +6,22 @@ export const FILE_CONSTRAINTS: FileConstraints = {
   requiredHeaders: ['Account Number', 'Value Date', 'Customer Reference', 'Amount']
 };
 
+export const LEGACY_REQUIRED_HEADERS = [
+  'Account Number',
+  'Value Date',
+  'Customer Reference',
+  'Amount'
+] as const;
+
+export const NEW_REQUIRED_HEADERS = [
+  'Value Date',
+  'Statement Date',
+  'Amount',
+  'Beneficiary/ Remitter',
+  'Customer Reference',
+  'Description'
+] as const;
+
 export const PROCESSING_STEPS = {
   PARSING: 'Parsing CSV file...',
   FINDING: 'Finding transaction data...',
@@ -17,9 +33,9 @@ export const ERROR_MESSAGES = {
   INVALID_FILE_TYPE: 'File must be a CSV file with .csv extension',
   FILE_TOO_LARGE: `File size must be less than ${FILE_CONSTRAINTS.maxSizeMB}MB`,
   FILE_EMPTY: 'File is empty',
-  MISSING_HEADERS: 'CSV file must contain required headers: Account Number, Value Date, Customer Reference, Amount',
+  MISSING_HEADERS: 'CSV file must contain either the legacy CitiBank headers or the new CitiBank headers',
   NO_DATA_ROWS: 'CSV file contains no transaction data',
-  INVALID_DATE_FORMAT: 'Date must be in MM/DD/YYYY format',
+  INVALID_DATE_FORMAT: 'Date must be in M/D/YYYY or MM/DD/YYYY format',
   INVALID_AMOUNT_FORMAT: 'Amount must be a valid number',
   MISSING_REQUIRED_FIELD: 'Required field is missing or empty',
   MALFORMED_CSV: 'CSV file is malformed or corrupted'
@@ -32,7 +48,7 @@ export const SUCCESS_MESSAGES = {
 } as const;
 
 export const DATE_FORMATS = {
-  INPUT_FORMAT: /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/,
+  INPUT_FORMAT: /^(0?[1-9]|1[0-2])\/(0?[1-9]|[12][0-9]|3[01])\/\d{4}$/,
   OUTPUT_FORMAT: 'DD/MM/YYYY'
 } as const;
 

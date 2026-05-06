@@ -43,11 +43,6 @@ export function useProcessingSimulator() {
     erroredRef.current = false
   }, [])
 
-  const retry = useCallback(() => {
-    reset()
-    start()
-  }, [reset])
-
   const cancel = useCallback(() => {
     canceledRef.current = true
     setStatus("cancelled")
@@ -123,6 +118,11 @@ export function useProcessingSimulator() {
 
     rafRef.current = requestAnimationFrame(tick)
   }, [stepIndex])
+
+  const retry = useCallback(() => {
+    reset()
+    start()
+  }, [reset, start])
 
   useEffect(() => {
     start()

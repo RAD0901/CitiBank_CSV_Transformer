@@ -1,45 +1,40 @@
 import type { 
-  CitiBankTransaction, 
+  CitiBankImportFormat,
+  NormalizedCitiBankRow,
   SageBankTransaction, 
   ValidationError, 
   ProcessingResult
 } from '../types';
-import { validateFieldValue } from './fileValidator';
-import { ERROR_MESSAGES, DATE_FORMATS } from './constants';
+import { findCSVHeader, validateFieldValue } from './fileValidator';
+import { ERROR_MESSAGES, DATE_FORMATS, METADATA_INDICATORS } from './constants';
 
 /**
  * Parses CitiBank CSV content and extracts transaction data
  */
-export function parseCitiBankCSV(csvContent: string): CitiBankTransaction[] {
+export function parseCitiBankCSV(csvContent: string): NormalizedCitiBankRow[] {
   const lines = csvContent.split('\n').filter(line => line.trim());
   
   // Find header row
-  const headerRowIndex = findHeaderRow(lines);
+  const { index: headerRowIndex, format, headers } = findCSVHeader(lines);
   if (headerRowIndex === -1) {
     throw new Error('Could not find header row with required fields');
   }
 
   // Extract data rows
   const dataRows = lines.slice(headerRowIndex + 1);
+  const headerMap = buildHeaderMap(headers);
 
   // Transform rows to objects
-  const transactions: CitiBankTransaction[] = [];
+  const transactions: NormalizedCitiBankRow[] = [];
   
-  dataRows.forEach((row) => {
+  dataRows.forEach((row, dataRowIndex) => {
     if (!row.trim() || isMetadataRow(row)) return;
     
     const fields = parseCSVRow(row);
-    if (fields.length < 4) return; // Skip incomplete rows
-    
-    const transaction: CitiBankTransaction = {
-      'Account Number': fields[0]?.trim() || '',
-      'Value Date': fields[1]?.trim() || '',
-      'Customer Reference': fields[2]?.trim() || '',
-      'Amount': fields[3]?.trim() || ''
-    };
+    const transaction = mapFieldsToNormalized(fields, headerMap, format as CitiBankImportFormat, headerRowIndex + dataRowIndex + 2);
 
     // Only add if essential fields are present
-    if (transaction['Value Date'] && transaction['Amount']) {
+    if (transaction.valueDate && transaction.amount) {
       transactions.push(transaction);
     }
   });
@@ -51,11 +46,12 @@ export function parseCitiBankCSV(csvContent: string): CitiBankTransaction[] {
  * Transforms date from MM/DD/YYYY to DD/MM/YYYY format
  */
 export function transformDate(inputDate: string): string {
-  if (!inputDate || !DATE_FORMATS.INPUT_FORMAT.test(inputDate)) {
-    throw new Error(`Invalid date format: ${inputDate}. Expected MM/DD/YYYY`);
+  const trimmedDate = inputDate?.trim();
+  if (!trimmedDate || !DATE_FORMATS.INPUT_FORMAT.test(trimmedDate)) {
+    throw new Error(`Invalid date format: ${inputDate}. Expected M/D/YYYY or MM/DD/YYYY`);
   }
 
-  const [month, day, year] = inputDate.split('/');
+  const [month, day, year] = trimmedDate.split('/');
   return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
 }
 
@@ -111,41 +107,76 @@ export function validateTransformedAmount(amount: string): boolean {
 /**
  * Transforms a single CitiBank row to Sage Bank Manager format
  */
-export function transformRow(row: CitiBankTransaction): SageBankTransaction {
+export function transformRow(row: NormalizedCitiBankRow): SageBankTransaction {
+  const description = getRowDescription(row);
+  const sourceDate = row.format === 'new' ? (row.statementDate || row.valueDate) : row.valueDate;
+
   return {
-    Date: transformDate(row['Value Date']),
-    Description: row['Customer Reference'].trim(),
-    Amount: transformAmount(row['Amount'])
+    Date: transformDate(sourceDate),
+    Description: description,
+    Amount: transformAmount(row.amount)
   };
 }
 
 /**
  * Validates a single CitiBank transaction row
  */
-export function validateRow(row: CitiBankTransaction, rowNumber: number): ValidationError[] {
+export function validateRow(row: NormalizedCitiBankRow, rowNumber: number): ValidationError[] {
   const errors: ValidationError[] = [];
+  const fieldsToValidate: Record<string, string> = {
+    Amount: row.amount
+  };
 
-  // Validate each field
-  Object.entries(row).forEach(([field, value]) => {
-    const fieldErrors = validateFieldValue(field, value, rowNumber);
-    fieldErrors.forEach(errorMessage => {
-      errors.push({
-        row: rowNumber,
-        field,
-        value,
-        message: errorMessage
-      });
+  if (row.format === 'legacy') {
+    fieldsToValidate['Value Date'] = row.valueDate;
+    fieldsToValidate['Customer Reference'] = row.customerReference;
+    fieldsToValidate['Account Number'] = row.accountNumber || '';
+  } else {
+    fieldsToValidate['Statement Date'] = row.statementDate || '';
+    fieldsToValidate['Customer Reference'] = row.customerReference;
+    fieldsToValidate['Description'] = row.description || '';
+    fieldsToValidate['Beneficiary/ Remitter'] = row.beneficiaryRemitter || '';
+  }
+
+  Object.entries(fieldsToValidate).forEach(([field, value]) => {
+    validateFieldValue(field, value, rowNumber).forEach(errorMessage => {
+      errors.push({ row: rowNumber, field, value, message: errorMessage });
     });
   });
 
-  // Additional business logic validation
-  if (row['Customer Reference'].trim().length === 0) {
+  if (row.format === 'legacy' && row.customerReference.trim().length === 0) {
     errors.push({
       row: rowNumber,
       field: 'Customer Reference',
-      value: row['Customer Reference'],
+      value: row.customerReference,
       message: 'Description cannot be empty'
     });
+  }
+
+  if (row.format === 'new') {
+    const isPayment = isPaymentRow(row.amount);
+    const isReceiptInternalRef = !isPayment && row.customerReference.trim() === '820 0201523001';
+    const derivedDescription = getRowDescription(row);
+    if (!derivedDescription) {
+      errors.push({
+        row: rowNumber,
+        field: isPayment
+          ? 'Beneficiary/ Remitter|Description'
+          : isReceiptInternalRef
+            ? 'Description'
+            : 'Customer Reference',
+        value: isPayment
+          ? `${row.beneficiaryRemitter || ''}|${row.description || ''}`
+          : isReceiptInternalRef
+            ? (row.description || '')
+            : row.customerReference,
+        message: isPayment
+          ? 'Payment rows require Beneficiary/ Remitter or Description'
+          : isReceiptInternalRef
+            ? 'Receipt/Deposit rows with Customer Reference 820 0201523001 require Description'
+            : 'Receipt/Deposit rows require Customer Reference'
+      });
+    }
   }
 
   return errors;
@@ -174,7 +205,7 @@ export function processCSVData(csvContent: string): ProcessingResult {
     result.statistics.totalRows = lines.length;
 
     // Find header row and count metadata
-    const headerRowIndex = findHeaderRow(lines);
+    const { index: headerRowIndex } = findCSVHeader(lines);
     if (headerRowIndex === -1) {
       result.errors.push({
         row: 0,
@@ -203,8 +234,8 @@ export function processCSVData(csvContent: string): ProcessingResult {
     // Process each transaction
     const transformedData: SageBankTransaction[] = [];
     
-    transactions.forEach((transaction, index) => {
-      const rowNumber = headerRowIndex + index + 2; // Actual CSV row number
+    transactions.forEach((transaction) => {
+      const rowNumber = transaction.sourceRowNumber;
       
       try {
         // Validate the row
@@ -295,25 +326,11 @@ export function downloadCSV(csvContent: string, filename: string = 'sage_bank_ma
 // Helper functions
 
 /**
- * Finds the header row containing account information
- */
-function findHeaderRow(lines: string[]): number {
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.includes('Account Number') && line.includes('Value Date')) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-/**
  * Checks if a line is metadata (not transaction data)
  */
 function isMetadataRow(line: string): boolean {
   const trimmedLine = line.trim();
-  const metadataIndicators = ['Search Criteria:', 'From Date:', 'To Date:', 'Accounts:', '""'];
-  return metadataIndicators.some(indicator => 
+  return METADATA_INDICATORS.some(indicator => 
     trimmedLine.startsWith(indicator) || trimmedLine === '""' || trimmedLine === ''
   );
 }
@@ -341,4 +358,78 @@ function parseCSVRow(row: string): string[] {
   
   result.push(current.trim());
   return result;
+}
+
+function buildHeaderMap(headers: string[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  headers.forEach((header, index) => {
+    map[header.trim()] = index;
+  });
+  return map;
+}
+
+function fieldValue(fields: string[], headerMap: Record<string, number>, header: string): string {
+  const index = headerMap[header];
+  if (index === undefined) {
+    return '';
+  }
+  return (fields[index] ?? '').trim();
+}
+
+function mapFieldsToNormalized(
+  fields: string[],
+  headerMap: Record<string, number>,
+  format: CitiBankImportFormat,
+  sourceRowNumber: number
+): NormalizedCitiBankRow {
+  if (format === 'legacy') {
+    return {
+      format,
+      sourceRowNumber,
+      accountNumber: fieldValue(fields, headerMap, 'Account Number'),
+      valueDate: fieldValue(fields, headerMap, 'Value Date'),
+      amount: fieldValue(fields, headerMap, 'Amount'),
+      customerReference: fieldValue(fields, headerMap, 'Customer Reference')
+    };
+  }
+
+  return {
+    format,
+    sourceRowNumber,
+    valueDate: fieldValue(fields, headerMap, 'Value Date'),
+    statementDate: fieldValue(fields, headerMap, 'Statement Date'),
+    amount: fieldValue(fields, headerMap, 'Amount'),
+    customerReference: fieldValue(fields, headerMap, 'Customer Reference'),
+    beneficiaryRemitter: fieldValue(fields, headerMap, 'Beneficiary/ Remitter'),
+    description: fieldValue(fields, headerMap, 'Description'),
+    type: fieldValue(fields, headerMap, 'Type'),
+    bankReference: fieldValue(fields, headerMap, 'Bank Reference')
+  };
+}
+
+function isPaymentRow(amount: string): boolean {
+  const transformed = transformAmount(amount);
+  return parseFloat(transformed) < 0;
+}
+
+function getRowDescription(row: NormalizedCitiBankRow): string {
+  if (row.format === 'legacy') {
+    return row.customerReference.trim();
+  }
+
+  if (isPaymentRow(row.amount)) {
+    const beneficiary = row.beneficiaryRemitter?.trim() ?? '';
+    if (beneficiary) {
+      return beneficiary;
+    }
+    return row.description?.trim() ?? '';
+  }
+
+  // Receipts/deposits override:
+  // when Citi internal reference is present, use Description instead.
+  if (row.customerReference.trim() === '820 0201523001') {
+    return row.description?.trim() ?? '';
+  }
+
+  return row.customerReference.trim();
 }

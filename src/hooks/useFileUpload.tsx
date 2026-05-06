@@ -30,6 +30,12 @@ export const useFileUpload = (): FileUploadHook => {
     }
   }, []);
 
+  const clearFile = useCallback(() => {
+    setFile(null);
+    setUploadStatus('idle');
+    setValidationResult(null);
+  }, []);
+
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) {
       clearFile();
@@ -44,12 +50,6 @@ export const useFileUpload = (): FileUploadHook => {
   const handleDragDrop = useCallback(async (files: FileList | null) => {
     await handleFileSelect(files);
   }, [handleFileSelect]);
-
-  const clearFile = useCallback(() => {
-    setFile(null);
-    setUploadStatus('idle');
-    setValidationResult(null);
-  }, []);
 
   const isValid = uploadStatus === 'ready' && validationResult?.isValid === true;
 

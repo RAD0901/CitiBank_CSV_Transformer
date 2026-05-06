@@ -26,7 +26,6 @@ export default function StepIndicator({
       {steps.map((step, i) => {
         const isActive = i === currentIndex && status === "processing"
         const isDone = i < currentIndex || status === "completed"
-        const isUpcoming = i > currentIndex && status !== "completed"
         const color =
           isDone ? "text-emerald-600 dark:text-emerald-400" :
           isActive ? "text-blue-600 dark:text-blue-400" :

@@ -96,10 +96,6 @@ export default function FileQueue({
     if (toAdd.length) setItems((prev) => [...prev, ...toAdd])
   }, [])
 
-  const removeItem = useCallback((id: string) => {
-    setItems((prev) => prev.filter((i) => i.id !== id))
-  }, [])
-
   const clearQueue = useCallback(() => {
     setItems([])
     onErrorsUpdate?.([])
@@ -114,16 +110,15 @@ export default function FileQueue({
     [addFiles]
   )
 
-  const [errors, setErrors] = useState<ErrorItem[]>([])
   const updateErrors = useCallback(
     (list: ErrorItem[]) => {
-      setErrors(list)
       onErrorsUpdate?.(list)
     },
     [onErrorsUpdate]
   )
 
   // Processing simulation with batch size
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const processAll = useCallback(async () => {
     if (!items.length) return
     setBusy(true)
@@ -175,8 +170,6 @@ export default function FileQueue({
         const start = performance.now()
         const totalMs = 2200 + Math.random() * 2800
         const localErrors: ErrorItem[] = []
-        const stepMark = [0.25, 0.5, 0.75, 1]
-
         const tick = () => {
           setItems((prev) => {
             const cur = prev.find((i) => i.id === qi.id)
@@ -404,7 +397,6 @@ export default function FileQueue({
                                 await (async () => {
                                   await new Promise((r) => setTimeout(r, 0))
                                 })()
-                                const clone = { ...it }
                                 setItems((prev) => prev.map((p) => (p.id === it.id ? { ...p, status: "queued", progress: 0 } : p)))
                                 await (async () => {
                                   await new Promise((r) => setTimeout(r, 0))

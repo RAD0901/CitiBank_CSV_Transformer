@@ -6,6 +6,34 @@ export interface CitiBankTransaction {
   'Amount': string; // Quoted with commas like "1,750,000.00"
 }
 
+export interface CitiBankNewTransaction {
+  'Value Date': string;
+  'Statement Date': string;
+  Currency: string;
+  Amount: string;
+  'Beneficiary/ Remitter': string;
+  'Customer Reference': string;
+  Type: string;
+  'Bank Reference': string;
+  Description: string;
+}
+
+export type CitiBankImportFormat = 'legacy' | 'new';
+
+export interface NormalizedCitiBankRow {
+  format: CitiBankImportFormat;
+  sourceRowNumber: number;
+  accountNumber?: string;
+  valueDate: string;
+  statementDate?: string;
+  amount: string;
+  customerReference: string;
+  beneficiaryRemitter?: string;
+  description?: string;
+  type?: string;
+  bankReference?: string;
+}
+
 // Sage Bank Manager output structure  
 export interface SageBankTransaction {
   Date: string; // DD/MM/YYYY format

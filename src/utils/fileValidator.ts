@@ -1,5 +1,12 @@
-import type { ValidationResult } from '../types';
-import { FILE_CONSTRAINTS, ERROR_MESSAGES, METADATA_INDICATORS } from './constants';
+import type { CitiBankImportFormat, ValidationResult } from '../types';
+import {
+  FILE_CONSTRAINTS,
+  ERROR_MESSAGES,
+  METADATA_INDICATORS,
+  LEGACY_REQUIRED_HEADERS,
+  NEW_REQUIRED_HEADERS,
+  DATE_FORMATS
+} from './constants';
 
 /**
  * Validates uploaded file for basic requirements
@@ -63,17 +70,18 @@ export function validateCSVStructure(csvContent: string): ValidationResult {
     }
 
     // Find header row
-    const headerRowIndex = findHeaderRow(lines);
+    const headerInfo = findHeaderRow(lines);
+    const headerRowIndex = headerInfo.index;
     if (headerRowIndex === -1) {
       errors.push(ERROR_MESSAGES.MISSING_HEADERS);
       return { isValid: false, errors, warnings };
     }
 
     // Validate headers
-    const headerRow = lines[headerRowIndex];
-    const headers = parseCSVRow(headerRow);
-    const missingHeaders = FILE_CONSTRAINTS.requiredHeaders.filter(
-      required => !headers.some(header => header.trim() === required)
+    const headers = headerInfo.headers;
+    const requiredHeaders = headerInfo.format === 'new' ? NEW_REQUIRED_HEADERS : LEGACY_REQUIRED_HEADERS;
+    const missingHeaders = requiredHeaders.filter(
+      required => !headers.some(header => header === required)
     );
 
     if (missingHeaders.length > 0) {
@@ -94,11 +102,11 @@ export function validateCSVStructure(csvContent: string): ValidationResult {
       warnings.push('Very few transaction rows found. Please verify this is a complete export.');
     }
 
-    if (headerRowIndex > 10) {
+    if (headerRowIndex > 10 && headerInfo.format === 'legacy') {
       warnings.push('Many metadata rows detected. File structure may be unusual.');
     }
 
-  } catch (error) {
+  } catch {
     errors.push(ERROR_MESSAGES.MALFORMED_CSV);
   }
 
@@ -128,14 +136,15 @@ export function checkFileType(file: File): boolean {
 /**
  * Finds the header row containing account information
  */
-function findHeaderRow(lines: string[]): number {
+function findHeaderRow(lines: string[]): { index: number; format: CitiBankImportFormat | null; headers: string[] } {
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.includes('Account Number') && line.includes('Value Date')) {
-      return i;
+    const headers = parseCSVRow(lines[i]).map(header => header.trim());
+    const format = detectCSVFormat(headers);
+    if (format) {
+      return { index: i, format, headers };
     }
   }
-  return -1;
+  return { index: -1, format: null, headers: [] };
 }
 
 /**
@@ -181,6 +190,7 @@ export function validateFieldValue(field: string, value: string, rowNumber: numb
 
   switch (field) {
     case 'Value Date':
+    case 'Statement Date':
       if (!value || !isValidDate(value)) {
         errors.push(`Row ${rowNumber}: ${ERROR_MESSAGES.INVALID_DATE_FORMAT}`);
       }
@@ -212,13 +222,12 @@ export function validateFieldValue(field: string, value: string, rowNumber: numb
  * Validates date format (MM/DD/YYYY)
  */
 function isValidDate(dateStr: string): boolean {
-  const dateRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/;
-  if (!dateRegex.test(dateStr)) {
+  if (!DATE_FORMATS.INPUT_FORMAT.test(dateStr.trim())) {
     return false;
   }
 
   // Additional validation for actual date validity
-  const [month, day, year] = dateStr.split('/').map(Number);
+  const [month, day, year] = dateStr.trim().split('/').map(Number);
   const date = new Date(year, month - 1, day);
   return date.getFullYear() === year && 
          date.getMonth() === month - 1 && 
@@ -232,4 +241,27 @@ function isValidAmount(amountStr: string): boolean {
   // Remove quotes, spaces, and commas for validation
   const cleaned = amountStr.replace(/["',\s]/g, '');
   return !isNaN(parseFloat(cleaned)) && isFinite(parseFloat(cleaned));
+}
+
+export function detectCSVFormat(headers: string[]): CitiBankImportFormat | null {
+  const normalizedHeaders = headers.map(header => header.trim());
+  const hasLegacyHeaders = LEGACY_REQUIRED_HEADERS.every(required =>
+    normalizedHeaders.includes(required)
+  );
+  if (hasLegacyHeaders) {
+    return 'legacy';
+  }
+
+  const hasNewHeaders = NEW_REQUIRED_HEADERS.every(required =>
+    normalizedHeaders.includes(required)
+  );
+  if (hasNewHeaders) {
+    return 'new';
+  }
+
+  return null;
+}
+
+export function findCSVHeader(lines: string[]): { index: number; format: CitiBankImportFormat | null; headers: string[] } {
+  return findHeaderRow(lines);
 }
