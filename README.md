@@ -34,9 +34,9 @@ Account Number,Value Date,Customer Reference,Amount
 ### Newer CitiBank export
 
 ```csv
-Value Date,Statement Date,Currency,Amount,Beneficiary/ Remitter,Customer Reference,Type,Bank Reference,Description
-04/17/2025,04/17/2025,ZAR,'-5000000,,820 0201523001,DE-Data Entry,3935930991,TARGET BALANCING SWEEP (EOD)
-04/17/2025,04/17/2025,ZAR,5000000,(CS)QPP50004S10736493331,FSK ELECTRAMECOR,FT-Funds Transfer,5107029424,INCOMING CLEARING TRANSFER
+Value Date,Statement Date,Currency,Amount,Beneficiary/ Remitter,Customer Reference,Type,Description,Narrative
+5/08/2026,5/11/2026,ZAR,"'-1,046.50",,ZA1ZMSC261310021,DE-Data Entry,EFT DIRECT DEBIT RETURNED,KUV050              ACCOUNT FROZEN
+5/08/2026,5/11/2026,ZAR,'-5198,,ZA1ZMSC26131000R,DE-Data Entry,EFT DIRECT DEBIT RETURNED,ASA060              NOT PROVIDED FOR
 ```
 
 ### Output format
@@ -57,6 +57,8 @@ The app scans the CSV line by line until it finds one of these header sets:
 
 - Legacy: `Account Number`, `Value Date`, `Customer Reference`, `Amount`
 - New: `Value Date`, `Statement Date`, `Amount`, `Beneficiary/ Remitter`, `Customer Reference`, `Description`
+
+For newer exports, optional columns such as `Bank Reference` and `Narrative` are also mapped when present.
 
 ### 2. Metadata skipping
 
@@ -89,6 +91,7 @@ The converter validates:
 Row-level validation behavior:
 
 - Legacy rows require `Value Date`, `Amount`, `Account Number`, and non-empty `Customer Reference`
+- New-format debit order rejection rows require non-empty `Narrative`
 - New-format payment rows require `Beneficiary/ Remitter` or `Description`
 - New-format receipt/deposit rows require `Customer Reference`
 - Special case: when `Customer Reference` is `820 0201523001` on a non-payment row, the app uses `Description` instead
@@ -117,6 +120,7 @@ Examples:
 ### 7. Description mapping
 
 - Legacy rows: use `Customer Reference`
+- New debit order rejection rows where the amount is negative and `Description = EFT DIRECT DEBIT RETURNED`: use `Narrative`
 - New payment rows (negative amount): use `Beneficiary/ Remitter`, otherwise fall back to `Description`
 - New receipt/deposit rows: use `Customer Reference`
 - Internal-reference receipts with `Customer Reference = 820 0201523001`: use `Description`
@@ -292,8 +296,8 @@ See `NETLIFY_DEPLOYMENT.md` for additional Netlify notes.
 
 Two example input files are included in `public/samples/`:
 
-- `sample-citibank-export.csv` - legacy format
-- `NEW_sample_citibank_export.csv` - new format
+- `sample_citibank_export.csv` - legacy format
+- `NEW_sample_citibank_export.csv` - newer-format debit order rejection examples that use `Narrative` for the output description
 
 ## Testing
 

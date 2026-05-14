@@ -66,8 +66,12 @@ Successfully implemented comprehensive core CSV transformation logic for the Cit
 1. **Metadata Skipping**: Automatically skips first 5+ lines of CitiBank metadata
 2. **Header Detection**: Finds "Account Number" row to start transaction parsing
 3. **Date Conversion**: MM/DD/YYYY → DD/MM/YYYY (07/31/2025 → 31/07/2025)
-4. **Amount Cleaning**: "1,750,000.00" → 1750000 (removes quotes, commas, rounds)
-5. **Description Mapping**: Customer Reference → Description field
+4. **Amount Cleaning**: "1,750,000.00" → "1750000.00" (removes quotes, commas, apostrophes, and spaces while preserving decimal precision)
+5. **Description Mapping**:
+   - Legacy rows use `Customer Reference`
+   - New debit order rejection rows use `Narrative` when `Description` is `EFT DIRECT DEBIT RETURNED` and the amount is negative
+   - Other new-format negative rows use `Beneficiary/ Remitter`, falling back to `Description`
+   - New-format positive rows use `Customer Reference`
 6. **Validation**: Each field validated before transformation
 
 ### Error Handling Capabilities
