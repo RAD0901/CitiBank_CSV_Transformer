@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, AlertCircle, Settings, History, Upload } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import ProgressIndicator from "./components/progress-indicator";
 import FileUploadZone from "./components/file-upload-zone";
 import ValidationMessage from "./components/validation-message";
@@ -13,8 +14,8 @@ import DownloadButton from "./components/download-button";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { useCSVProcessor } from './hooks/useCSVProcessor';
-// import { useSettings } from './hooks/useSettings';
-// import { useHistory } from './hooks/useHistory';
+import { useSettings } from './hooks/useSettings';
+import { useHistory } from './hooks/useHistory';
 import { generateOutputCSV, downloadCSV } from './utils/csvTransformer';
 import './App.css';
 
@@ -32,8 +33,9 @@ function App() {
   const errorRef = useRef<HTMLDivElement | null>(null);
   const proceedButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  // const { generateFilename } = useSettings();
-  // const { addSession } = useHistory();
+  const { settings, generateFilename } = useSettings();
+  const { addSession } = useHistory();
+  const { setTheme } = useTheme();
 
   const {
     processFile,
@@ -45,6 +47,10 @@ function App() {
     isComplete,
     reset: resetProcessor
   } = useCSVProcessor();
+
+  useEffect(() => {
+    setTheme(settings.theme);
+  }, [settings.theme, setTheme]);
 
   const validateFile = useCallback((file: File): FileState => {
     const name = file.name.toLowerCase();
@@ -122,27 +128,68 @@ function App() {
   const onProceed = useCallback(async () => {
     if (fileState.status !== "valid") return;
     setCurrentStep(2);
+    const processingStartedAt = performance.now();
     
     try {
-      await processFile(fileState.file);
-      setCurrentStep(isComplete ? 4 : 3);
+      const processingResult = await processFile(fileState.file, {
+        dateFormat: settings.dateFormat,
+        amountRounding: settings.amountRounding,
+        errorHandling: settings.errorHandling,
+      });
+
+      if (!processingResult) {
+        return;
+      }
+
+      const outputFilename = generateFilename(fileState.file.name);
+      const outputCsv = processingResult.data.length > 0
+        ? generateOutputCSV(processingResult.data)
+        : '';
+      const outputFileSize = outputCsv
+        ? new Blob([outputCsv], { type: 'text/csv;charset=utf-8;' }).size
+        : 0;
+
+      addSession(
+        fileState.file.name,
+        outputFilename,
+        {
+          totalRows: processingResult.statistics.totalRows,
+          processedRows: processingResult.statistics.processedRows,
+          errorRows: processingResult.statistics.errorRows,
+          warningRows: 0,
+          processingTime: Math.round(performance.now() - processingStartedAt),
+          originalSize: fileState.file.size,
+          outputSize: outputFileSize,
+        },
+        { ...settings },
+        fileState.file.size,
+        outputFileSize
+      );
+
+      if (processingResult.success && settings.autoDownload && outputCsv) {
+        downloadCSV(outputCsv, outputFilename);
+        setCurrentStep(4);
+        return;
+      }
+
+      setCurrentStep(3);
     } catch (error) {
       console.error('Processing failed:', error);
     }
-  }, [fileState, processFile, isComplete]);
+  }, [addSession, fileState, generateFilename, processFile, settings]);
 
   const handleDownload = useCallback(() => {
-    if (!result?.data) return;
+    if (!result?.data || fileState.status !== "valid") return;
     
     const csvContent = generateOutputCSV(result.data);
-    downloadCSV(csvContent);
+    downloadCSV(csvContent, generateFilename(fileState.file.name));
     setCurrentStep(4);
-  }, [result]);
+  }, [fileState, generateFilename, result]);
 
   // Determine current step based on processing state
   const displayStep = useMemo(() => {
     if (isProcessing) return 2;
-    if (isComplete && result?.success) return 3;
+    if (isComplete && result?.success) return currentStep === 4 ? 4 : 3;
     return currentStep;
   }, [currentStep, isProcessing, isComplete, result]);
 
@@ -317,6 +364,15 @@ function App() {
                       errors={result.statistics.errorRows}
                       loading={false}
                     />
+
+                    {settings.showAdvancedStats && fileState.status === "valid" && (
+                      <div className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm text-slate-700 sm:grid-cols-2">
+                        <p><strong>Metadata rows skipped:</strong> {result.statistics.metadataRows}</p>
+                        <p><strong>Success rate:</strong> {result.statistics.successRate.toFixed(1)}%</p>
+                        <p><strong>Output filename:</strong> {generateFilename(fileState.file.name)}</p>
+                        <p><strong>Applied settings:</strong> {settings.dateFormat}, {settings.amountRounding}, {settings.errorHandling}</p>
+                      </div>
+                    )}
 
                     {result.data.length > 0 && (
                       <div>

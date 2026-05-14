@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { 
+  ProcessingOptions,
   ProcessingResult, 
   ProcessingProgress, 
   ValidationError,
@@ -69,7 +70,10 @@ export function useCSVProcessor(): CSVProcessorHook {
   /**
    * Processes a CSV file through all stages
    */
-  const processFile = useCallback(async (file: File): Promise<void> => {
+  const processFile = useCallback(async (
+    file: File,
+    options: ProcessingOptions = {}
+  ): Promise<ProcessingResult | null> => {
     try {
       // Reset state
       reset();
@@ -93,7 +97,7 @@ export function useCSVProcessor(): CSVProcessorHook {
         }));
         setErrors(validationErrors);
         setIsProcessing(false);
-        return;
+        return null;
       }
 
       // Read file content
@@ -110,7 +114,7 @@ export function useCSVProcessor(): CSVProcessorHook {
         }));
         setErrors(structureErrors);
         setIsProcessing(false);
-        return;
+        return null;
       }
 
       // Stage 2: Finding Transaction Data
@@ -131,7 +135,7 @@ export function useCSVProcessor(): CSVProcessorHook {
       );
 
       // Process the CSV data
-      const processingResult = processCSVData(csvContent);
+      const processingResult = processCSVData(csvContent, options);
 
       // Stage 4: Generating Output
       updateProgress(
@@ -168,6 +172,8 @@ export function useCSVProcessor(): CSVProcessorHook {
         );
       }
 
+      return processingResult;
+
     } catch (error) {
       const processingError: ValidationError = {
         row: 0,
@@ -185,6 +191,8 @@ export function useCSVProcessor(): CSVProcessorHook {
         0,
         'Processing failed'
       );
+
+      return null;
     }
   }, [updateProgress, reset]);
 

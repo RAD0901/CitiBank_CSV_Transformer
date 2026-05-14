@@ -66,7 +66,7 @@ export function SettingsPanel() {
     reader.readAsText(file);
   };
 
-  const previewFilename = generateFilename('sample-citibank-export.csv');
+  const previewFilename = generateFilename('sample_citibank_export.csv');
 
   return (
     <Card className="w-full max-w-4xl">
@@ -119,7 +119,7 @@ export function SettingsPanel() {
                 <Label htmlFor="amount-rounding">Amount Rounding</Label>
                 <Select
                   value={settings.amountRounding}
-                  onValueChange={(value: 'round' | 'truncate') => 
+                  onValueChange={(value: 'preserve' | 'round' | 'truncate') => 
                     updateSetting('amountRounding', value)
                   }
                 >
@@ -127,6 +127,7 @@ export function SettingsPanel() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="preserve">Preserve exact decimal precision</SelectItem>
                     <SelectItem value="round">Round to nearest integer</SelectItem>
                     <SelectItem value="truncate">Truncate decimal places</SelectItem>
                   </SelectContent>
@@ -197,7 +198,7 @@ export function SettingsPanel() {
               <Label htmlFor="theme">Theme</Label>
               <Select
                 value={settings.theme}
-                onValueChange={(value: 'light' | 'dark') => 
+                onValueChange={(value: 'light' | 'dark' | 'system') => 
                   updateSetting('theme', value)
                 }
               >
@@ -205,6 +206,7 @@ export function SettingsPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="system">System</SelectItem>
                   <SelectItem value="light">Light</SelectItem>
                   <SelectItem value="dark">Dark</SelectItem>
                 </SelectContent>

@@ -68,6 +68,12 @@ export interface ProcessingResult {
   statistics: ProcessingStatistics;
 }
 
+export interface ProcessingOptions {
+  dateFormat?: 'DD/MM/YYYY' | 'MM/DD/YYYY';
+  amountRounding?: 'preserve' | 'round' | 'truncate';
+  errorHandling?: 'skip' | 'stop';
+}
+
 // File validation result
 export interface ValidationResult {
   isValid: boolean;
@@ -112,7 +118,7 @@ export interface FileConstraints {
 
 // Hook return types
 export interface CSVProcessorHook {
-  processFile: (file: File) => Promise<void>;
+  processFile: (file: File, options?: ProcessingOptions) => Promise<ProcessingResult | null>;
   progress: ProcessingProgress;
   currentStep: ProcessingStageType | null;
   result: ProcessingResult | null;

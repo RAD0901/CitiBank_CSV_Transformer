@@ -5,7 +5,7 @@
 This is a React TypeScript application for converting CitiBank CSV exports to Sage Bank Manager format.
 
 ## Project Context
-- **Framework**: React 18+ with TypeScript and Vite
+- **Framework**: React 19 with TypeScript and Vite
 - **Styling**: Tailwind CSS with shadcn/ui components
 - **CSV Processing**: custom client-side parsing and transformation in `src/utils/csvTransformer.ts`
 - **State Management**: React hooks (useState, useCallback)
@@ -27,12 +27,13 @@ This is a React TypeScript application for converting CitiBank CSV exports to Sa
 
 ## Data Transformation Rules
 1. Skip metadata rows (first 5 lines)
-2. Convert date format: MM/DD/YYYY → DD/MM/YYYY
-3. Clean amounts: remove quotes, commas, apostrophes, and spaces while preserving decimal precision
+2. Convert dates to the configured output format (`DD/MM/YYYY` or `MM/DD/YYYY`)
+3. Clean amounts: remove quotes, commas, apostrophes, and spaces while preserving decimal precision by default
 4. Legacy rows use `Customer Reference` as Description
 5. New-format debit order rejection rows use `Narrative` when the amount is negative and `Description` is exactly `EFT DIRECT DEBIT RETURNED`
 6. Other new-format negative rows use `Beneficiary/ Remitter`, falling back to `Description`
 7. New-format positive rows use `Customer Reference`, except internal-reference receipts where `Customer Reference = 820 0201523001`, which use `Description`
+8. Saved settings and processing history are live parts of the mounted `App.tsx` flow
 
 ## Component Architecture
 - Main App component handles state management

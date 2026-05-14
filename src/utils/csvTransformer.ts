@@ -1,6 +1,7 @@
 import type { 
   CitiBankImportFormat,
   NormalizedCitiBankRow,
+  ProcessingOptions,
   SageBankTransaction, 
   ValidationError, 
   ProcessingResult
@@ -45,14 +46,24 @@ export function parseCitiBankCSV(csvContent: string): NormalizedCitiBankRow[] {
 /**
  * Transforms date from MM/DD/YYYY to DD/MM/YYYY format
  */
-export function transformDate(inputDate: string): string {
+export function transformDate(
+  inputDate: string,
+  outputFormat: ProcessingOptions['dateFormat'] = 'DD/MM/YYYY'
+): string {
   const trimmedDate = inputDate?.trim();
   if (!trimmedDate || !DATE_FORMATS.INPUT_FORMAT.test(trimmedDate)) {
     throw new Error(`Invalid date format: ${inputDate}. Expected M/D/YYYY or MM/DD/YYYY`);
   }
 
   const [month, day, year] = trimmedDate.split('/');
-  return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+  const paddedMonth = month.padStart(2, '0');
+  const paddedDay = day.padStart(2, '0');
+
+  if (outputFormat === 'MM/DD/YYYY') {
+    return `${paddedMonth}/${paddedDay}/${year}`;
+  }
+
+  return `${paddedDay}/${paddedMonth}/${year}`;
 }
 
 /**
@@ -60,7 +71,10 @@ export function transformDate(inputDate: string): string {
  * Input examples: " -1,911,566.02", "1,750,000.00", " 88,433.98"
  * Output examples: "-1911566.02", "1750000.00", "88433.98"
  */
-export function transformAmount(inputAmount: string): string {
+export function transformAmount(
+  inputAmount: string,
+  roundingMode?: ProcessingOptions['amountRounding']
+): string {
   if (!inputAmount || typeof inputAmount !== 'string') {
     throw new Error('Invalid amount input');
   }
@@ -76,7 +90,16 @@ export function transformAmount(inputAmount: string): string {
   if (isNaN(numericValue)) {
     throw new Error(`Invalid numeric amount: ${inputAmount}`);
   }
-  
+
+  if (roundingMode === 'round') {
+    return `${Math.round(numericValue)}`;
+  }
+
+  if (roundingMode === 'truncate') {
+    const truncatedValue = numericValue < 0 ? Math.ceil(numericValue) : Math.floor(numericValue);
+    return `${truncatedValue}`;
+  }
+
   // Return as string with exact decimal precision preserved
   return withoutCommas;
 }
@@ -107,14 +130,17 @@ export function validateTransformedAmount(amount: string): boolean {
 /**
  * Transforms a single CitiBank row to Sage Bank Manager format
  */
-export function transformRow(row: NormalizedCitiBankRow): SageBankTransaction {
+export function transformRow(
+  row: NormalizedCitiBankRow,
+  options: ProcessingOptions = {}
+): SageBankTransaction {
   const description = getRowDescription(row);
   const sourceDate = row.format === 'new' ? (row.statementDate || row.valueDate) : row.valueDate;
 
   return {
-    Date: transformDate(sourceDate),
+    Date: transformDate(sourceDate, options.dateFormat),
     Description: description,
-    Amount: transformAmount(row.amount)
+    Amount: transformAmount(row.amount, options.amountRounding)
   };
 }
 
@@ -192,7 +218,7 @@ export function validateRow(row: NormalizedCitiBankRow, rowNumber: number): Vali
 /**
  * Processes complete CSV data and returns formatted result
  */
-export function processCSVData(csvContent: string): ProcessingResult {
+export function processCSVData(csvContent: string, options: ProcessingOptions = {}): ProcessingResult {
   const result: ProcessingResult = {
     success: false,
     data: [],
@@ -240,8 +266,9 @@ export function processCSVData(csvContent: string): ProcessingResult {
 
     // Process each transaction
     const transformedData: SageBankTransaction[] = [];
-    
-    transactions.forEach((transaction) => {
+    const shouldStopOnError = options.errorHandling === 'stop';
+
+    for (const transaction of transactions) {
       const rowNumber = transaction.sourceRowNumber;
       
       try {
@@ -251,11 +278,14 @@ export function processCSVData(csvContent: string): ProcessingResult {
         if (validationErrors.length > 0) {
           result.errors.push(...validationErrors);
           result.statistics.errorRows++;
-          return; // Skip this row
+          if (shouldStopOnError) {
+            break;
+          }
+          continue;
         }
 
         // Transform the row
-        const transformedRow = transformRow(transaction);
+        const transformedRow = transformRow(transaction, options);
         transformedData.push(transformedRow);
         result.statistics.processedRows++;
         
@@ -267,8 +297,11 @@ export function processCSVData(csvContent: string): ProcessingResult {
           message: `Transformation error: ${error}`
         });
         result.statistics.errorRows++;
+        if (shouldStopOnError) {
+          break;
+        }
       }
-    });
+    }
 
     // Calculate success rate
     const totalProcessableRows = transactions.length;

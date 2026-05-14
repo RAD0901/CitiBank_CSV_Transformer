@@ -3,6 +3,7 @@ import {
   type ProcessingSession,
   type ProcessingStatistics,
   type UserSettings,
+  HISTORY_CHANGED_EVENT,
   saveProcessingHistory,
   getProcessingHistory,
   clearProcessingHistory,
@@ -13,16 +14,32 @@ export function useHistory() {
   const [history, setHistory] = useState<ProcessingSession[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const loadHistory = useCallback(() => {
+    const stored = getProcessingHistory();
+    setHistory(stored);
+    setIsLoaded(true);
+  }, []);
+
   // Load history on mount
   useEffect(() => {
-    const loadHistory = () => {
-      const stored = getProcessingHistory();
-      setHistory(stored);
-      setIsLoaded(true);
+    loadHistory();
+  }, [loadHistory]);
+
+  useEffect(() => {
+    const handleStorageChange = (event?: StorageEvent) => {
+      if (!event || event.key === null || event.key === 'citibank-csv-transformer-history') {
+        loadHistory();
+      }
     };
 
-    loadHistory();
-  }, []);
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener(HISTORY_CHANGED_EVENT, handleStorageChange as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener(HISTORY_CHANGED_EVENT, handleStorageChange as EventListener);
+    };
+  }, [loadHistory]);
 
   const addSession = useCallback((
     originalFilename: string,
@@ -45,19 +62,14 @@ export function useHistory() {
 
     // Save to localStorage
     saveProcessingHistory(session);
-
-    // Update state
-    setHistory(prev => [session, ...prev.slice(0, 49)]); // Keep last 50
   }, []);
 
   const removeSession = useCallback((id: string) => {
     removeHistoryItem(id);
-    setHistory(prev => prev.filter(session => session.id !== id));
   }, []);
 
   const clearHistory = useCallback(() => {
     clearProcessingHistory();
-    setHistory([]);
   }, []);
 
   const getSessionById = useCallback((id: string): ProcessingSession | undefined => {

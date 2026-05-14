@@ -11,7 +11,9 @@ The current application is a Vite + React + TypeScript single-page app. All file
 - Detects two CitiBank export layouts: legacy and newer statement exports
 - Converts valid rows into Sage Bank Manager format: `Date,Description,Amount`
 - Shows processing progress and a preview of the first 5 output rows
-- Downloads the generated CSV in the browser
+- Downloads the generated CSV in the browser using the configured filename template
+- Applies saved settings for output date format, amount handling, theme, auto-download, and error handling
+- Records processing history metadata in `localStorage`
 - Exposes separate Settings and History tabs backed by `localStorage`
 
 ## Supported input formats
@@ -100,7 +102,7 @@ Row-level validation behavior:
 
 - Legacy rows use `Value Date`
 - New-format rows prefer `Statement Date`, falling back to `Value Date`
-- Output dates are always converted to `DD/MM/YYYY`
+- Output dates follow the active setting: `DD/MM/YYYY` or `MM/DD/YYYY`
 
 ### 6. Amount transformation
 
@@ -108,8 +110,8 @@ The app:
 
 - removes quotes, apostrophes, spaces, and commas as needed
 - preserves the sign
-- preserves decimal precision as a string
-- does not round to integers in the current live pipeline
+- preserves decimal precision by default
+- can optionally round or truncate amounts to integers through Settings
 
 Examples:
 
@@ -155,7 +157,7 @@ The app includes a settings UI backed by `localStorage` for:
 - date format preference
 - amount rounding preference
 - error handling preference
-- filename template preview
+- filename template
 - auto-download toggle
 - theme preference
 - advanced stats toggle
@@ -163,21 +165,23 @@ The app includes a settings UI backed by `localStorage` for:
 
 ### History tab
 
-The app includes a history UI that reads and manages processing sessions from `localStorage`.
+The app includes a history UI that stores and manages processing-session metadata in `localStorage`, including:
+
+- original and generated filenames
+- input and output sizes
+- processing duration
+- processed/error row counts
+- the settings snapshot used for that run
 
 ## Important current limitations
 
-The repository contains some planned or partially implemented features that are not yet wired into the main converter flow in `src/App.tsx`.
+The repository still contains some planned or prototype code paths that are not wired into the main converter flow in `src/App.tsx`.
 
 At the moment:
 
 - the live converter only processes one file at a time
-- downloaded files always use the default filename `sage_bank_manager_import.csv`
-- settings shown in the Settings tab are mostly not applied to the actual conversion pipeline yet
-- conversion output is always `DD/MM/YYYY`, regardless of the saved date setting
-- amount values currently preserve decimals; saved rounding preferences are not applied
-- invalid rows are skipped; the saved "stop on first error" setting is not applied
-- processing sessions are not currently recorded by the main converter, so the History tab may remain empty unless that storage is populated elsewhere
+- history stores processing metadata only; it does not persist raw uploaded files or generated CSV contents
+- re-download from History is not currently available because generated files are not stored
 - there are alternate or prototype components in `src/components/advanced/`, `src/components/BasicProcessor.tsx`, `src/components/EnhancedProcessor.tsx`, and `v0.dev_files/` that are not the mounted production path
 
 ## Tech stack

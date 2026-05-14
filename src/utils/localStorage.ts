@@ -2,10 +2,10 @@
 
 export interface UserSettings {
   dateFormat: 'DD/MM/YYYY' | 'MM/DD/YYYY';
-  amountRounding: 'round' | 'truncate';
+  amountRounding: 'preserve' | 'round' | 'truncate';
   errorHandling: 'skip' | 'stop';
   filenameTemplate: string;
-  theme: 'light' | 'dark';
+  theme: 'light' | 'dark' | 'system';
   autoDownload: boolean;
   showAdvancedStats: boolean;
 }
@@ -34,14 +34,16 @@ export interface ProcessingSession {
 // Storage keys
 const SETTINGS_KEY = 'citibank-csv-transformer-settings';
 const HISTORY_KEY = 'citibank-csv-transformer-history';
+export const SETTINGS_CHANGED_EVENT = 'citibank-settings-changed';
+export const HISTORY_CHANGED_EVENT = 'citibank-history-changed';
 
 // Default settings
 export const DEFAULT_SETTINGS: UserSettings = {
   dateFormat: 'DD/MM/YYYY',
-  amountRounding: 'round',
+  amountRounding: 'preserve',
   errorHandling: 'skip',
   filenameTemplate: '{originalName}_sage_{date}',
-  theme: 'light',
+  theme: 'system',
   autoDownload: false,
   showAdvancedStats: true,
 };
@@ -56,10 +58,18 @@ function safeLocalStorage<T>(operation: () => T, fallback: T): T {
   }
 }
 
+function notifyStorageChange(eventName: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(eventName));
+}
+
 // User settings storage
 export function saveUserSettings(settings: UserSettings): void {
   safeLocalStorage(
-    () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)),
+    () => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      notifyStorageChange(SETTINGS_CHANGED_EVENT);
+    },
     undefined
   );
 }
@@ -77,7 +87,10 @@ export function getUserSettings(): UserSettings | null {
 
 export function clearUserSettings(): void {
   safeLocalStorage(
-    () => localStorage.removeItem(SETTINGS_KEY),
+    () => {
+      localStorage.removeItem(SETTINGS_KEY);
+      notifyStorageChange(SETTINGS_CHANGED_EVENT);
+    },
     undefined
   );
 }
@@ -88,6 +101,7 @@ export function saveProcessingHistory(session: ProcessingSession): void {
     const existing = getProcessingHistory();
     const updated = [session, ...existing].slice(0, 50); // Keep last 50 sessions
     localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+    notifyStorageChange(HISTORY_CHANGED_EVENT);
   }, undefined);
 }
 
@@ -107,7 +121,10 @@ export function getProcessingHistory(): ProcessingSession[] {
 
 export function clearProcessingHistory(): void {
   safeLocalStorage(
-    () => localStorage.removeItem(HISTORY_KEY),
+    () => {
+      localStorage.removeItem(HISTORY_KEY);
+      notifyStorageChange(HISTORY_CHANGED_EVENT);
+    },
     undefined
   );
 }
@@ -117,6 +134,7 @@ export function removeHistoryItem(id: string): void {
     const existing = getProcessingHistory();
     const filtered = existing.filter(session => session.id !== id);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
+    notifyStorageChange(HISTORY_CHANGED_EVENT);
   }, undefined);
 }
 

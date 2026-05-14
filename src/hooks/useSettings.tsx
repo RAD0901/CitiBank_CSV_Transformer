@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   type UserSettings,
   DEFAULT_SETTINGS,
+  SETTINGS_CHANGED_EVENT,
   saveUserSettings,
   getUserSettings,
   clearUserSettings,
@@ -14,18 +15,33 @@ export function useSettings() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
 
+  const loadSettings = useCallback(() => {
+    const stored = getUserSettings();
+    setSettings(stored ?? DEFAULT_SETTINGS);
+    setIsLoaded(true);
+  }, []);
+
   // Load settings on mount
   useEffect(() => {
-    const loadSettings = () => {
-      const stored = getUserSettings();
-      if (stored) {
-        setSettings(stored);
+    loadSettings();
+  }, [loadSettings]);
+
+  // Keep multiple hook instances in sync within the same tab and across tabs
+  useEffect(() => {
+    const handleStorageChange = (event?: StorageEvent) => {
+      if (!event || event.key === null || event.key === 'citibank-csv-transformer-settings') {
+        loadSettings();
       }
-      setIsLoaded(true);
     };
 
-    loadSettings();
-  }, []);
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener(SETTINGS_CHANGED_EVENT, handleStorageChange as EventListener);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener(SETTINGS_CHANGED_EVENT, handleStorageChange as EventListener);
+    };
+  }, [loadSettings]);
 
   // Save settings when they change (debounced)
   useEffect(() => {

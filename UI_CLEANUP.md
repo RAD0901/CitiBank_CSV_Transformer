@@ -1,57 +1,25 @@
-# 🎨 UI Improvement - Redundant Button Removed
+# UI Cleanup Notes
 
-## **Change Made**
+This file is now a short reference note instead of a point-in-time cleanup log.
 
-**Removed**: Duplicate "Download CSV" button that was doing the exact same function as "Download Converted CSV"
+## Current converter UI
 
-## **Before**
-```tsx
-<DownloadButton
-  status="idle"
-  label="Download Converted CSV"
-  onClick={handleDownload}
-/>
-<Button onClick={handleDownload} className="flex-1">
-  Download CSV
-</Button>
-```
+The mounted UI in `src/App.tsx` currently provides:
 
-## **After**  
-```tsx
-<DownloadButton
-  status="idle"
-  label="Download Converted CSV"
-  onClick={handleDownload}
-  className="flex-1"
-/>
-```
+- one primary upload flow for a single CitiBank CSV
+- progress feedback during parsing, finding, transforming, and generating
+- a preview of the first 5 converted rows
+- one primary download action after successful processing
+- a Settings tab for active converter preferences
+- a History tab for recorded processing-session metadata
 
-## **Benefits**
+## Current cleanup status
 
-✅ **Cleaner UI** - No more confusing duplicate buttons  
-✅ **Better UX** - Single clear action for users  
-✅ **Consistent** - Uses the enhanced DownloadButton with status indicators  
-✅ **Full Width** - Button now takes full available width with `flex-1`
+- duplicate download actions are no longer present in the mounted flow
+- the download action uses the shared `DownloadButton` component
+- settings and history are part of the live app, not just placeholder tabs
 
-## **Enhanced DownloadButton Features**
+## Remaining UI constraints
 
-The remaining button provides:
-- 📊 **Status indicators** (idle, downloading, success, error)
-- 🔄 **Progress tracking** during download
-- ✅ **Success feedback** when complete
-- 🔁 **Retry functionality** if download fails
-- 🎨 **Modern styling** with hover effects
-
-## **Technical Updates**
-
-- **Added `className` prop** to DownloadButton component
-- **Applied `flex-1`** to make button take full width
-- **Removed redundant** regular Button component
-
-## **Result**
-
-Clean, professional download interface with enhanced functionality and better user experience!
-
----
-**Status**: ✅ **Complete**  
-**Build**: ✅ **Successful**
+- the live app is still single-file only
+- prototype UI paths still exist outside the mounted converter flow

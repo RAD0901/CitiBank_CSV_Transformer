@@ -1,92 +1,29 @@
-# 🔧 **Download Button Fix - Issue Resolved**
+# Download Behavior Notes
 
-## **Problem Identified**
+This note replaces the older bug-fix snapshot.
 
-The "Download Converted CSV" button was not working because of a bug in the `DownloadButton` component implementation.
+## Current behavior
 
-### **Root Cause**
-The `DownloadButton` component had this logic:
-```tsx
-onClick={isError ? onRetry : undefined}
-```
+The mounted app uses a single `DownloadButton` in `src/App.tsx` to download the generated Sage Bank Manager CSV.
 
-This meant the button only worked when `status === "error"`, but in the App.tsx, the status was always `"idle"`, so `onClick` was `undefined`.
+Current download behavior:
 
-### **The Two Buttons**
-1. **"Download Converted CSV"** (DownloadButton component) - ❌ **Was broken**
-2. **"Download CSV"** (Regular Button component) - ✅ **Always worked**
+- manual download is available after successful processing
+- filenames follow the active Settings filename template
+- auto-download can be enabled from Settings
+- the downloaded file still contains the same three output columns:
+  - `Date`
+  - `Description`
+  - `Amount`
 
-## **Solution Applied**
+## Current implementation path
 
-### **1. Updated DownloadButton Component**
-**File**: `src/components/download-button.tsx`
+- UI button: `src/components/download-button.tsx`
+- click handling: `src/App.tsx`
+- CSV generation: `src/utils/csvTransformer.ts`
 
-**Changes**:
-- Added `onClick?: () => void` to Props interface
-- Updated component logic: `onClick={isError ? onRetry : onClick}`
-- Now works for both error retry AND normal download scenarios
+## Notes
 
-### **2. Updated App.tsx Usage**
-**File**: `src/App.tsx`
-
-**Changes**:
-- Changed from `onRetry={handleDownload}` to `onClick={handleDownload}`
-- Now properly connects the download function to the button
-
-## **Technical Details**
-
-### **Before Fix**:
-```tsx
-// DownloadButton component
-onClick={isError ? onRetry : undefined}  // ❌ undefined when status="idle"
-
-// App.tsx usage
-<DownloadButton
-  status="idle"           // ❌ Not "error", so onClick is undefined
-  onRetry={handleDownload} // ❌ Only works when isError=true
-/>
-```
-
-### **After Fix**:
-```tsx
-// DownloadButton component  
-onClick={isError ? onRetry : onClick}    // ✅ Works for both cases
-
-// App.tsx usage
-<DownloadButton
-  status="idle"           // ✅ Status is idle
-  onClick={handleDownload} // ✅ Always works
-/>
-```
-
-## **What Both Buttons Do**
-
-Both download buttons now execute the exact same functionality:
-
-1. **Generate CSV Content**: `generateOutputCSV(result.data)`
-2. **Create Download**: `downloadCSV(csvContent, 'sage_bank_manager_import.csv')`
-3. **Browser Download**: Creates blob, temporary URL, and triggers download
-
-### **File Generated**:
-- **Filename**: `sage_bank_manager_import.csv`
-- **Format**: Sage Bank Manager compatible CSV
-- **Content**: Transformed CitiBank data with proper date/amount formatting
-
-## **Test Results**
-
-✅ **Build Status**: Successful compilation  
-✅ **TypeScript**: No type errors  
-✅ **Functionality**: Both buttons now work identically  
-✅ **Core Logic**: All transformation logic preserved  
-
-## **User Experience**
-
-Users now have a single, clean download option:
-- **"Download Converted CSV"** - Styled download button with status indicators
-
-This generates the transformed CSV file ready for Sage Bank Manager import!
-
----
-**Fix Applied**: ✅ **Complete**  
-**UI Cleanup**: ✅ **Redundant button removed**  
-**Status**: 🎉 **Ready for Production**
+- generated CSV contents are downloaded directly in the browser
+- generated CSV contents are not persisted to History
+- History stores metadata only, so re-download from the History tab is not currently available
