@@ -1,29 +1,26 @@
-# React + TypeScript + Vite
+# CitiBank CSV Transformer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Browser-based converter for turning CitiBank CSV exports into the three-column CSV format expected by Sage Bank Manager.
 
-Currently, two official plugins are available:
+The current application is a Vite + React + TypeScript single-page app. All file handling and transformation happen client-side in the browser; there is no backend and uploaded files are not sent to a server.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## What the app currently does
 
-# CitiBank to Sage Bank Manager CSV Transformer
+- Accepts a single `.csv` file by drag and drop or file picker
+- Validates file size, extension, headers, and row-level data
+- Detects two CitiBank export layouts: legacy and newer statement exports
+- Converts valid rows into Sage Bank Manager format: `Date,Description,Amount`
+- Shows processing progress and a preview of the first 5 output rows
+- Downloads the generated CSV in the browser
+- Exposes separate Settings and History tabs backed by `localStorage`
 
-A modern web application that converts CitiBank CSV export files into the format required by Sage Bank Manager for seamless import.
+## Supported input formats
 
-## 🎯 What This Application Does
+### Legacy CitiBank export
 
-### Core Functionality
-- **File Upload**: Accepts CitiBank CSV files via drag & drop or file browser
-- **Data Transformation**: Converts CitiBank format to Sage Bank Manager format
-- **Progress Tracking**: Real-time processing progress with detailed status updates
-- **Data Preview**: Side-by-side comparison of original vs transformed data
-- **File Download**: Generates properly formatted CSV for Sage Bank Manager import
+This format may include metadata rows before the real header:
 
-### Data Transformation Details
-
-**Input Format (CitiBank CSV, legacy):**
-```
+```csv
 Search Criteria: ,,,
 From Date: ,07/10/2025,,
 To Date: ,08/08/2025,,
@@ -34,271 +31,284 @@ Account Number,Value Date,Customer Reference,Amount
 2987066,07/31/2025,20950P1FR2O," -88,433.98"
 ```
 
-**Input Format (CitiBank CSV, new):**
-```
+### Newer CitiBank export
+
+```csv
 Value Date,Statement Date,Currency,Amount,Beneficiary/ Remitter,Customer Reference,Type,Bank Reference,Description
 04/17/2025,04/17/2025,ZAR,'-5000000,,820 0201523001,DE-Data Entry,3935930991,TARGET BALANCING SWEEP (EOD)
 04/17/2025,04/17/2025,ZAR,5000000,(CS)QPP50004S10736493331,FSK ELECTRAMECOR,FT-Funds Transfer,5107029424,INCOMING CLEARING TRANSFER
 ```
 
-**Output Format (Sage Bank Manager):**
-```
+### Output format
+
+```csv
 Date,Description,Amount
-31/07/2025,FSK ELECTRAMECOR,1750000
-31/07/2025,20950P1FR2O,-88434
+31/07/2025,FSK ELECTRAMECOR,1750000.00
+31/07/2025,20950P1FR2O,-88433.98
 ```
 
-### Transformation Rules
-1. **Dual Format Support**: Detect and process either legacy or new CitiBank export headers.
-2. **Metadata Handling**: Skip metadata rows when present in legacy exports.
-3. **Date Source**:
-   - Legacy format: use `Value Date`
-   - New format: use `Statement Date`
-4. **Date Format Output**: Convert `M/D/YYYY` or `MM/DD/YYYY` to `DD/MM/YYYY`.
-5. **Amount Cleaning**: Remove quotes, apostrophes, spaces, commas and preserve numeric sign/precision as string.
-6. **Description Mapping (new format)**:
-   - Payments (negative amount): use `Beneficiary/ Remitter`; if blank, use `Description`
-   - Receipts/Deposits (positive/zero amount): use `Customer Reference`
-7. **Legacy Description Mapping**: continue using `Customer Reference`.
+## Core transformation logic
 
-## 🏗️ Technical Architecture
+The live conversion pipeline is implemented in `src/hooks/useCSVProcessor.tsx`, `src/utils/fileValidator.ts`, and `src/utils/csvTransformer.ts`.
 
-### Frontend Stack
-- **Framework**: React 18+ with TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui components
-- **CSV Processing**: Papa Parse library
-- **File Handling**: Browser File API
-- **State Management**: React hooks (useState, useEffect, useContext)
+### 1. Format detection
 
-### Component Structure
+The app scans the CSV line by line until it finds one of these header sets:
+
+- Legacy: `Account Number`, `Value Date`, `Customer Reference`, `Amount`
+- New: `Value Date`, `Statement Date`, `Amount`, `Beneficiary/ Remitter`, `Customer Reference`, `Description`
+
+### 2. Metadata skipping
+
+Legacy exports can contain non-transaction rows such as:
+
+- `Search Criteria:`
+- `From Date:`
+- `To Date:`
+- `Accounts:`
+- `""`
+
+These rows are skipped before transaction parsing begins.
+
+### 3. Row normalization
+
+Rows from both CitiBank formats are mapped into a shared internal shape so the rest of the pipeline can process them consistently.
+
+### 4. Validation rules
+
+The converter validates:
+
+- file extension: `.csv` only
+- file size: up to 10 MB
+- non-empty file content
+- presence of a supported header row
+- date values in `M/D/YYYY` or `MM/DD/YYYY`
+- amount values after cleaning
+- required description sources for output rows
+
+Row-level validation behavior:
+
+- Legacy rows require `Value Date`, `Amount`, `Account Number`, and non-empty `Customer Reference`
+- New-format payment rows require `Beneficiary/ Remitter` or `Description`
+- New-format receipt/deposit rows require `Customer Reference`
+- Special case: when `Customer Reference` is `820 0201523001` on a non-payment row, the app uses `Description` instead
+
+### 5. Date transformation
+
+- Legacy rows use `Value Date`
+- New-format rows prefer `Statement Date`, falling back to `Value Date`
+- Output dates are always converted to `DD/MM/YYYY`
+
+### 6. Amount transformation
+
+The app:
+
+- removes quotes, apostrophes, spaces, and commas as needed
+- preserves the sign
+- preserves decimal precision as a string
+- does not round to integers in the current live pipeline
+
+Examples:
+
+- `"1,750,000.00"` -> `1750000.00`
+- `" -88,433.98"` -> `-88433.98`
+- `"'-1,911,566.02"` -> `-1911566.02`
+
+### 7. Description mapping
+
+- Legacy rows: use `Customer Reference`
+- New payment rows (negative amount): use `Beneficiary/ Remitter`, otherwise fall back to `Description`
+- New receipt/deposit rows: use `Customer Reference`
+- Internal-reference receipts with `Customer Reference = 820 0201523001`: use `Description`
+
+### 8. Success criteria
+
+The processor skips invalid rows, collects errors, and still returns partial output when possible.
+
+Processing is considered successful only when:
+
+- at least one output row is produced, and
+- the success rate is at least 50 percent of processable rows
+
+## User flow
+
+### Converter tab
+
+1. Upload a CSV file
+2. Run validation
+3. Process the CSV through four stages:
+   - parsing
+   - finding transaction data
+   - transforming records
+   - generating output
+4. Preview the first 5 converted rows
+5. Download the output CSV
+
+### Settings tab
+
+The app includes a settings UI backed by `localStorage` for:
+
+- date format preference
+- amount rounding preference
+- error handling preference
+- filename template preview
+- auto-download toggle
+- theme preference
+- advanced stats toggle
+- export/import/reset of saved settings
+
+### History tab
+
+The app includes a history UI that reads and manages processing sessions from `localStorage`.
+
+## Important current limitations
+
+The repository contains some planned or partially implemented features that are not yet wired into the main converter flow in `src/App.tsx`.
+
+At the moment:
+
+- the live converter only processes one file at a time
+- downloaded files always use the default filename `sage_bank_manager_import.csv`
+- settings shown in the Settings tab are mostly not applied to the actual conversion pipeline yet
+- conversion output is always `DD/MM/YYYY`, regardless of the saved date setting
+- amount values currently preserve decimals; saved rounding preferences are not applied
+- invalid rows are skipped; the saved "stop on first error" setting is not applied
+- processing sessions are not currently recorded by the main converter, so the History tab may remain empty unless that storage is populated elsewhere
+- there are alternate or prototype components in `src/components/advanced/`, `src/components/BasicProcessor.tsx`, `src/components/EnhancedProcessor.tsx`, and `v0.dev_files/` that are not the mounted production path
+
+## Tech stack
+
+- React 19
+- TypeScript 5
+- Vite 7
+- Tailwind CSS 3
+- Radix UI / shadcn-style components
+- `next-themes` for theme provider support
+- ESLint 9
+
+Note: `papaparse` is installed as a dependency, but the current live transformation pipeline uses custom CSV parsing logic in `src/utils/csvTransformer.ts`.
+
+## Repository structure
+
+```text
+.
+├── src/
+│   ├── App.tsx                      # Mounted application shell
+│   ├── main.tsx                     # React entry point
+│   ├── hooks/
+│   │   ├── useCSVProcessor.tsx      # Live processing orchestration
+│   │   ├── useSettings.tsx          # Settings storage hook
+│   │   └── useHistory.tsx           # History storage hook
+│   ├── utils/
+│   │   ├── csvTransformer.ts        # Core parsing/transformation logic
+│   │   ├── fileValidator.ts         # File and row validation
+│   │   ├── constants.ts             # Header lists, errors, progress labels
+│   │   └── localStorage.ts          # Settings/history persistence helpers
+│   ├── types/
+│   │   └── index.ts                 # Shared app types
+│   ├── components/
+│   │   ├── file-upload-zone.tsx
+│   │   ├── processing-stats.tsx
+│   │   ├── progress-indicator.tsx
+│   │   ├── data-table.tsx
+│   │   ├── download-button.tsx
+│   │   ├── SettingsPanel.tsx
+│   │   ├── HistoryPanel.tsx
+│   │   └── ui/                      # Reusable UI primitives
+│   └── lib/
+│       ├── utils.ts
+│       └── enterprise-storage.ts    # Used by prototype/advanced flows
+├── public/
+│   └── samples/                     # Sample legacy and new-format CSVs
+├── .github/workflows/deploy.yml     # GitHub Pages deployment workflow
+├── netlify.toml                     # Netlify build, redirects, headers
+├── vite.config.ts                   # Vite config, aliases, build splitting
+├── tailwind.config.js               # Tailwind config
+├── eslint.config.js                 # ESLint config
+├── test_decimal_fix.js              # Manual decimal-preservation check
+└── v0.dev_files/                    # Reference/generated prototype files
 ```
-src/
-├── components/
-│   ├── FileUploadZone.tsx         # Drag & drop file upload
-│   ├── ProcessingProgress.tsx      # Progress tracking UI
-│   ├── DataPreview.tsx            # Before/after data comparison
-│   ├── DownloadResults.tsx        # File download interface
-│   └── ui/                        # shadcn/ui components
-├── hooks/
-│   ├── useCSVProcessor.tsx        # Core transformation logic
-│   ├── useFileUpload.tsx          # File upload handling
-│   └── useProgressTracking.tsx    # Progress state management
-├── utils/
-│   ├── csvTransformer.ts          # Core transformation functions
-│   ├── fileValidator.ts           # File validation logic
-│   └── constants.ts               # App constants and config
-└── types/
-    └── index.ts                   # TypeScript type definitions
-```
 
-### Data Flow
-1. **Upload** → File validation → Extract CSV data
-2. **Process** → Find transaction rows → Transform each row
-3. **Preview** → Show original vs transformed data
-4. **Download** → Generate output CSV → Trigger download
-
-## 🚀 Getting Started
+## Development setup
 
 ### Prerequisites
-- Node.js 18+ and npm
-- Modern web browser with JavaScript enabled
 
-### Installation
+- Node.js 18+
+- npm 9+
+
+### Install and run
+
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/citibank-csv-transformer.git
-cd citibank-csv-transformer
-
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
 ```
 
-### Building for Production
-```bash
-# Build the application
-npm run build
+The Vite dev server is configured to run on port `3000`.
 
-# Preview the production build
+### Build and preview
+
+```bash
+npm run build
 npm run preview
 ```
 
-### Deployment to Netlify
+The preview server is configured for port `4173`.
+
+## Available scripts
+
+- `npm run dev` - start the Vite development server
+- `npm run build` - build the production bundle
+- `npm run build:check` - run the build-focused TypeScript config, then build
+- `npm run lint` - run ESLint
+- `npm run preview` - preview the built app
+- `npm run build:netlify` - clean Netlify-style install and build
+- `npm run deploy` - build and publish `dist/` with `gh-pages`
+
+## Deployment
+
+### GitHub Pages
+
+The repo includes `.github/workflows/deploy.yml`, which:
+
+- runs on pushes and pull requests targeting `main`
+- installs dependencies with `npm ci`
+- builds the app
+- uploads `dist/`
+- deploys to GitHub Pages
+
+### Netlify
+
+The repo also includes `netlify.toml`, which defines:
+
+- build command: `npm run build`
+- publish directory: `dist`
+- SPA redirect to `index.html`
+- security headers
+- cache headers for static assets
+
+See `NETLIFY_DEPLOYMENT.md` for additional Netlify notes.
+
+## Sample data
+
+Two example input files are included in `public/samples/`:
+
+- `sample-citibank-export.csv` - legacy format
+- `NEW_sample_citibank_export.csv` - new format
+
+## Testing
+
+There is currently no formal unit-test or end-to-end test suite configured in `package.json`.
+
+The repo does include one manual verification script:
+
 ```bash
-# Build the application
-npm run build
-
-# Or deploy automatically via GitHub integration
-# See NETLIFY_DEPLOYMENT.md for complete deployment guide
+node test_decimal_fix.js
 ```
 
-For detailed deployment instructions, see **[NETLIFY_DEPLOYMENT.md](./NETLIFY_DEPLOYMENT.md)**
+This script checks that amount normalization preserves decimal precision for banking values.
 
-## 🎨 UI Components
+## Notes for maintainers
 
-The application uses modern UI components with:
-- **Responsive Design**: Mobile-first approach
-- **Accessibility**: ARIA labels, keyboard navigation
-- **Animations**: Smooth transitions and micro-interactions
-- **Error States**: Comprehensive error handling with helpful messages
-- **Progress Indicators**: Real-time feedback during processing
-
-## 📊 Validation & Error Handling
-
-### File Validation
-- Must be .csv extension
-- Maximum 10MB file size
-- Must contain either supported legacy or new CitiBank headers
-- Minimum 1 transaction row required
-
-### Data Validation
-- Date format validation (`M/D/YYYY` and `MM/DD/YYYY`)
-- Amount must be numeric after cleaning
-- Handle missing or malformed data gracefully
-- For new format payment rows, description source must exist (`Beneficiary/ Remitter` or `Description`)
-- For new format receipt/deposit rows, `Customer Reference` is required
-
-### Error Recovery
-- Clear error messages with suggested fixes
-- Option to retry processing
-- Detailed error reporting for troubleshooting
-
-## 🔧 Configuration
-
-### Processing Settings
-- Date format conversion (MM/DD/YYYY → DD/MM/YYYY)
-- Amount rounding (round vs truncate)
-- Error handling strategy (skip invalid rows vs stop processing)
-- Output filename template
-
-## 📁 Sample Data
-
-### Input Sample
-```csv
-Account Number,Value Date,Customer Reference,Amount
-2987066,07/31/2025,FSK ELECTRAMECOR,"1,750,000.00"
-2987066,07/31/2025,20950P1FR2O," -88,433.98"
-```
-
-### Output Sample  
-```csv
-Date,Description,Amount
-31/07/2025,FSK ELECTRAMECOR,1750000
-31/07/2025,20950P1FR2O,-88434
-```
-
-## 🧪 Testing
-
-### Running Tests
-```bash
-# Run unit tests
-npm run test
-
-# Run tests with coverage
-npm run test:coverage
-
-# Run end-to-end tests
-npm run test:e2e
-```
-
-### Browser Testing
-- Modern browsers (Chrome, Firefox, Safari, Edge)
-- Mobile responsiveness
-- File upload compatibility
-
-## 📋 Development
-
-### Project Structure
-- Built with Vite for fast development and building
-- TypeScript for type safety
-- Tailwind CSS for styling
-- ESLint for code quality
-
-### Available Scripts
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-- `npm run deploy` - Deploy to GitHub Pages
-
-## 🔄 Processing Pipeline
-
-### Step 1: File Upload (0-25%)
-- Validate file format and size
-- Read file contents
-- Initial CSV parsing
-
-### Step 2: Data Extraction (25-50%)
-- Skip metadata rows
-- Find transaction header row
-- Extract transaction data
-
-### Step 3: Data Transformation (50-75%)
-- Transform each transaction row
-- Date format conversion
-- Amount cleaning and conversion
-- Data validation
-
-### Step 4: Output Generation (75-100%)
-- Generate Sage Bank Manager CSV
-- Apply final validation
-- Prepare file for download
-
-## 🎯 Success Criteria
-
-- ✅ Handles all CitiBank CSV export formats
-- ✅ 100% accurate data transformation
-- ✅ Intuitive, user-friendly interface
-- ✅ Comprehensive error handling
-- ✅ Fast processing (< 5 seconds for typical files)
-- ✅ Mobile-responsive design
-- ✅ Accessibility compliant
-- ✅ Production-ready deployment
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📞 Support
-
-If you encounter any issues or have questions, please [open an issue](https://github.com/yourusername/citibank-csv-transformer/issues) on GitHub.
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-# CitiBank_CSV_Transformer
+- `dist/` and `node_modules/` are generated directories
+- `src/App.tsx` is the primary source of truth for what is actually mounted in the UI
+- several markdown files in the repo describe earlier plans or completed milestones, but this README is intended to describe the current implemented behavior

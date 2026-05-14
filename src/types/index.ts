@@ -16,6 +16,7 @@ export interface CitiBankNewTransaction {
   Type: string;
   'Bank Reference': string;
   Description: string;
+  Narrative?: string;
 }
 
 export type CitiBankImportFormat = 'legacy' | 'new';
@@ -30,6 +31,7 @@ export interface NormalizedCitiBankRow {
   customerReference: string;
   beneficiaryRemitter?: string;
   description?: string;
+  narrative?: string;
   type?: string;
   bankReference?: string;
 }

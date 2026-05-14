@@ -154,23 +154,30 @@ export function validateRow(row: NormalizedCitiBankRow, rowNumber: number): Vali
   }
 
   if (row.format === 'new') {
+    const isDebitOrderRejection = isDebitOrderRejectionRow(row);
     const isPayment = isPaymentRow(row.amount);
     const isReceiptInternalRef = !isPayment && row.customerReference.trim() === '820 0201523001';
     const derivedDescription = getRowDescription(row);
     if (!derivedDescription) {
       errors.push({
         row: rowNumber,
-        field: isPayment
+        field: isDebitOrderRejection
+          ? 'Narrative'
+          : isPayment
           ? 'Beneficiary/ Remitter|Description'
           : isReceiptInternalRef
             ? 'Description'
             : 'Customer Reference',
-        value: isPayment
+        value: isDebitOrderRejection
+          ? (row.narrative || '')
+          : isPayment
           ? `${row.beneficiaryRemitter || ''}|${row.description || ''}`
           : isReceiptInternalRef
             ? (row.description || '')
             : row.customerReference,
-        message: isPayment
+        message: isDebitOrderRejection
+          ? 'Debit order rejection rows require Narrative'
+          : isPayment
           ? 'Payment rows require Beneficiary/ Remitter or Description'
           : isReceiptInternalRef
             ? 'Receipt/Deposit rows with Customer Reference 820 0201523001 require Description'
@@ -402,6 +409,7 @@ function mapFieldsToNormalized(
     customerReference: fieldValue(fields, headerMap, 'Customer Reference'),
     beneficiaryRemitter: fieldValue(fields, headerMap, 'Beneficiary/ Remitter'),
     description: fieldValue(fields, headerMap, 'Description'),
+    narrative: fieldValue(fields, headerMap, 'Narrative'),
     type: fieldValue(fields, headerMap, 'Type'),
     bankReference: fieldValue(fields, headerMap, 'Bank Reference')
   };
@@ -412,9 +420,21 @@ function isPaymentRow(amount: string): boolean {
   return parseFloat(transformed) < 0;
 }
 
+function isDebitOrderRejectionRow(row: NormalizedCitiBankRow): boolean {
+  return (
+    row.format === 'new' &&
+    isPaymentRow(row.amount) &&
+    (row.description?.trim() ?? '') === 'EFT DIRECT DEBIT RETURNED'
+  );
+}
+
 function getRowDescription(row: NormalizedCitiBankRow): string {
   if (row.format === 'legacy') {
     return row.customerReference.trim();
+  }
+
+  if (isDebitOrderRejectionRow(row)) {
+    return row.narrative?.trim() ?? '';
   }
 
   if (isPaymentRow(row.amount)) {
