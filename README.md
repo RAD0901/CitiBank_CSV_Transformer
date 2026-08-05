@@ -41,6 +41,29 @@ Value Date,Statement Date,Currency,Amount,Beneficiary/ Remitter,Customer Referen
 5/08/2026,5/11/2026,ZAR,'-5198,,ZA1ZMSC26131000R,DE-Data Entry,EFT DIRECT DEBIT RETURNED,ASA060              NOT PROVIDED FOR
 ```
 
+### Latest CitiBank export (renamed columns)
+
+CitiBank may rename columns. The importer resolves logical fields via aliases, so either naming works:
+
+| Logical field | Accepted headers |
+| --- | --- |
+| Amount | `Amount`, `Transaction Amount` |
+| Beneficiary | `Beneficiary/ Remitter`, `Beneficiary/ Remitter Name` |
+| Customer Reference | `Customer Reference`, `Customer Reference Number` |
+| Description | `Description`, `Transaction Description` |
+| Type | `Type`, `Product Type` |
+| Narrative | `Narrative` |
+| Statement Date | `Statement Date` |
+| Value Date | `Value Date` |
+| Account Number | `Account Number` |
+
+Extra columns (Currency, Bank Reference, Product Type, future columns, etc.) are ignored and do not cause validation failures.
+
+```csv
+Value Date,Statement Date,Currency,Transaction Amount,Beneficiary/ Remitter Name,Customer Reference Number,Product Type,Transaction Description,Narrative
+5/08/2026,5/11/2026,ZAR,"'-1,046.50",,ZA1ZMSC261310021,DE-Data Entry,EFT DIRECT DEBIT RETURNED,KUV050              ACCOUNT FROZEN
+```
+
 ### Output format
 
 ```csv
@@ -55,12 +78,12 @@ The live conversion pipeline is implemented in `src/hooks/useCSVProcessor.tsx`, 
 
 ### 1. Format detection
 
-The app scans the CSV line by line until it finds one of these header sets:
+The app scans the CSV line by line until it finds a header row with enough **required business fields** (matched via aliases, not exact full header sets):
 
-- Legacy: `Account Number`, `Value Date`, `Customer Reference`, `Amount`
-- New: `Value Date`, `Statement Date`, `Amount`, `Beneficiary/ Remitter`, `Customer Reference`, `Description`
+- Legacy: `Account Number`, `Value Date`, `Customer Reference`, `Amount` (or aliases)
+- New / latest: `Amount`, `Customer Reference`, `Description` (or aliases), plus `Value Date` and/or `Statement Date`
 
-For newer exports, optional columns such as `Bank Reference` and `Narrative` are also mapped when present.
+Column order does not matter. Unused columns are ignored.
 
 ### 2. Metadata skipping
 
@@ -298,10 +321,11 @@ See `NETLIFY_DEPLOYMENT.md` for additional Netlify notes.
 
 ## Sample data
 
-Two example input files are included in `public/samples/`:
+Example input files are included in `public/samples/`:
 
-- `sample_citibank_export.csv` - legacy format
+- `sample_citibank_export.csv` - newer-format payments/receipts
 - `NEW_sample_citibank_export.csv` - newer-format debit order rejection examples that use `Narrative` for the output description
+- `LATEST_sample_citibank_export.csv` - latest renamed-column export (`Transaction Amount`, `Customer Reference Number`, etc.)
 
 ## Testing
 

@@ -9,8 +9,27 @@ import type {
 } from '../types';
 import { processCSVData } from '../utils/csvTransformer';
 import { validateFile, validateCSVStructure } from '../utils/fileValidator';
-import { PROCESSING_STEPS, PROGRESS_THRESHOLDS } from '../utils/constants';
+import { PROCESSING_STEPS, PROGRESS_THRESHOLDS, ERROR_MESSAGES } from '../utils/constants';
 import { ProcessingStage } from '../types';
+
+function emptyStatistics() {
+  return {
+    totalRows: 0,
+    metadataRows: 0,
+    processedRows: 0,
+    errorRows: 0,
+    successRate: 0
+  };
+}
+
+function failedResult(errors: ValidationError[]): ProcessingResult {
+  return {
+    success: false,
+    data: [],
+    errors,
+    statistics: emptyStatistics()
+  };
+}
 
 /**
  * Custom hook for processing CSV files with progress tracking
@@ -74,6 +93,8 @@ export function useCSVProcessor(): CSVProcessorHook {
     file: File,
     options: ProcessingOptions = {}
   ): Promise<ProcessingResult | null> => {
+    let processingResult: ProcessingResult | null = null;
+
     try {
       // Reset state
       reset();
@@ -89,15 +110,20 @@ export function useCSVProcessor(): CSVProcessorHook {
       // Validate file basic properties
       const fileValidation = validateFile(file);
       if (!fileValidation.isValid) {
-        const validationErrors: ValidationError[] = fileValidation.errors.map((error) => ({
-          row: 0,
-          field: 'file',
-          value: file.name,
-          message: error
-        }));
+        const validationErrors: ValidationError[] =
+          fileValidation.structuredErrors ??
+          fileValidation.errors.map((error) => ({
+            row: 0,
+            field: 'file',
+            value: file.name,
+            message: error
+          }));
+        processingResult = failedResult(validationErrors);
         setErrors(validationErrors);
-        setIsProcessing(false);
-        return null;
+        setResult(processingResult);
+        setIsComplete(true);
+        updateProgress(ProcessingStage.PARSING, 100, 'File validation failed');
+        return processingResult;
       }
 
       // Read file content
@@ -106,15 +132,20 @@ export function useCSVProcessor(): CSVProcessorHook {
       // Validate CSV structure
       const structureValidation = validateCSVStructure(csvContent);
       if (!structureValidation.isValid) {
-        const structureErrors: ValidationError[] = structureValidation.errors.map((error) => ({
-          row: 0,
-          field: 'structure',
-          value: '',
-          message: error
-        }));
+        const structureErrors: ValidationError[] =
+          structureValidation.structuredErrors ??
+          structureValidation.errors.map((error) => ({
+            row: 0,
+            field: 'structure',
+            value: '',
+            message: error
+          }));
+        processingResult = failedResult(structureErrors);
         setErrors(structureErrors);
-        setIsProcessing(false);
-        return null;
+        setResult(processingResult);
+        setIsComplete(true);
+        updateProgress(ProcessingStage.PARSING, 100, 'CSV structure validation failed');
+        return processingResult;
       }
 
       // Stage 2: Finding Transaction Data
@@ -135,7 +166,7 @@ export function useCSVProcessor(): CSVProcessorHook {
       );
 
       // Process the CSV data
-      const processingResult = processCSVData(csvContent, options);
+      processingResult = processCSVData(csvContent, options);
 
       // Stage 4: Generating Output
       updateProgress(
@@ -150,7 +181,6 @@ export function useCSVProcessor(): CSVProcessorHook {
       // Set final results
       setResult(processingResult);
       setErrors(processingResult.errors);
-      setIsProcessing(false);
       setIsComplete(true);
 
       // Final progress update
@@ -175,24 +205,31 @@ export function useCSVProcessor(): CSVProcessorHook {
       return processingResult;
 
     } catch (error) {
+      console.error('Unexpected CSV processing error:', error);
       const processingError: ValidationError = {
         row: 0,
         field: 'processing',
         value: '',
-        message: `Unexpected error: ${error}`
+        message: error instanceof Error
+          ? error.message
+          : `Unexpected error: ${error}`
       };
-      
+
+      processingResult = failedResult([processingError]);
       setErrors([processingError]);
-      setIsProcessing(false);
-      setIsComplete(false);
+      setResult(processingResult);
+      setIsComplete(true);
       
       updateProgress(
         ProcessingStage.PARSING,
-        0,
-        'Processing failed'
+        100,
+        ERROR_MESSAGES.PROCESSING_FAILED
       );
 
-      return null;
+      return processingResult;
+    } finally {
+      // Always clear loading so the UI never stays on "Processing..."
+      setIsProcessing(false);
     }
   }, [updateProgress, reset]);
 
@@ -221,6 +258,7 @@ function readFileContent(file: File): Promise<string> {
     };
     
     reader.onerror = () => {
+      console.error('Failed to read file:', file.name);
       reject(new Error('Failed to read file'));
     };
     

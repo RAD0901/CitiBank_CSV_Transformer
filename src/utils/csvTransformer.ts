@@ -6,8 +6,14 @@ import type {
   ValidationError, 
   ProcessingResult
 } from '../types';
-import { findCSVHeader, validateFieldValue } from './fileValidator';
-import { ERROR_MESSAGES, DATE_FORMATS, METADATA_INDICATORS } from './constants';
+import {
+  findCSVHeader,
+  validateFieldValue,
+  buildLogicalFieldMap,
+  formatUnsupportedFormatMessage,
+  normalizeHeader
+} from './fileValidator';
+import { ERROR_MESSAGES, DATE_FORMATS, METADATA_INDICATORS, type LogicalHeaderField } from './constants';
 
 /**
  * Parses CitiBank CSV content and extracts transaction data
@@ -18,12 +24,14 @@ export function parseCitiBankCSV(csvContent: string): NormalizedCitiBankRow[] {
   // Find header row
   const { index: headerRowIndex, format, headers } = findCSVHeader(lines);
   if (headerRowIndex === -1) {
-    throw new Error('Could not find header row with required fields');
+    throw new Error(formatUnsupportedFormatMessage(
+      lines.length > 0 ? parseCSVRow(lines[0]).map(normalizeHeader) : []
+    ));
   }
 
   // Extract data rows
   const dataRows = lines.slice(headerRowIndex + 1);
-  const headerMap = buildHeaderMap(headers);
+  const fieldMap = buildLogicalFieldMap(headers);
 
   // Transform rows to objects
   const transactions: NormalizedCitiBankRow[] = [];
@@ -32,10 +40,23 @@ export function parseCitiBankCSV(csvContent: string): NormalizedCitiBankRow[] {
     if (!row.trim() || isMetadataRow(row)) return;
     
     const fields = parseCSVRow(row);
-    const transaction = mapFieldsToNormalized(fields, headerMap, format as CitiBankImportFormat, headerRowIndex + dataRowIndex + 2);
+    const transaction = mapFieldsToNormalized(
+      fields,
+      fieldMap,
+      format as CitiBankImportFormat,
+      headerRowIndex + dataRowIndex + 2
+    );
 
-    // Only add if essential fields are present
-    if (transaction.valueDate && transaction.amount) {
+    const hasAmount = Boolean(transaction.amount);
+    const hasDate = Boolean(
+      transaction.valueDate ||
+      (transaction.format === 'new' && transaction.statementDate)
+    );
+
+    if (hasAmount && hasDate) {
+      if (!transaction.valueDate && transaction.statementDate) {
+        transaction.valueDate = transaction.statementDate;
+      }
       transactions.push(transaction);
     }
   });
@@ -158,10 +179,13 @@ export function validateRow(row: NormalizedCitiBankRow, rowNumber: number): Vali
     fieldsToValidate['Customer Reference'] = row.customerReference;
     fieldsToValidate['Account Number'] = row.accountNumber || '';
   } else {
-    fieldsToValidate['Statement Date'] = row.statementDate || '';
+    // Prefer Statement Date, fall back to Value Date (same as transform)
+    const dateSource = row.statementDate || row.valueDate;
+    const dateFieldLabel = row.statementDate ? 'Statement Date' : 'Value Date';
+    fieldsToValidate[dateFieldLabel] = dateSource || '';
     fieldsToValidate['Customer Reference'] = row.customerReference;
-    fieldsToValidate['Description'] = row.description || '';
-    fieldsToValidate['Beneficiary/ Remitter'] = row.beneficiaryRemitter || '';
+    // Description / Beneficiary are validated via derived description rules below —
+    // do not fail solely because one optional alias column is empty.
   }
 
   Object.entries(fieldsToValidate).forEach(([field, value]) => {
@@ -202,7 +226,7 @@ export function validateRow(row: NormalizedCitiBankRow, rowNumber: number): Vali
             ? (row.description || '')
             : row.customerReference,
         message: isDebitOrderRejection
-          ? 'Debit order rejection rows require Narrative'
+          ? `${ERROR_MESSAGES.DEBIT_ORDER_MISSING_NARRATIVE}\n\nRow ${rowNumber}`
           : isPayment
           ? 'Payment rows require Beneficiary/ Remitter or Description'
           : isReceiptInternalRef
@@ -238,13 +262,16 @@ export function processCSVData(csvContent: string, options: ProcessingOptions = 
     result.statistics.totalRows = lines.length;
 
     // Find header row and count metadata
-    const { index: headerRowIndex } = findCSVHeader(lines);
+    const { index: headerRowIndex, headers } = findCSVHeader(lines);
     if (headerRowIndex === -1) {
+      const message = formatUnsupportedFormatMessage(
+        findBestHeaderCandidateForError(lines)
+      );
       result.errors.push({
         row: 0,
         field: 'structure',
-        value: '',
-        message: ERROR_MESSAGES.MISSING_HEADERS
+        value: headers.join(', '),
+        message
       });
       return result;
     }
@@ -290,6 +317,7 @@ export function processCSVData(csvContent: string, options: ProcessingOptions = 
         result.statistics.processedRows++;
         
       } catch (error) {
+        console.error(`Row ${rowNumber} transformation failed:`, error);
         result.errors.push({
           row: rowNumber,
           field: 'transformation',
@@ -313,12 +341,25 @@ export function processCSVData(csvContent: string, options: ProcessingOptions = 
     result.data = transformedData;
     result.success = transformedData.length > 0 && result.statistics.successRate >= 50;
 
+    if (!result.success && transformedData.length === 0 && result.errors.length > 0) {
+      const hasRowErrors = result.errors.some((error) => error.row > 0);
+      if (hasRowErrors && !result.errors.some((e) => e.field === 'data')) {
+        result.errors.unshift({
+          row: 0,
+          field: 'data',
+          value: '',
+          message: ERROR_MESSAGES.NO_VALID_TRANSACTIONS
+        });
+      }
+    }
+
   } catch (error) {
+    console.error('CSV processing failed:', error);
     result.errors.push({
       row: 0,
       field: 'processing',
       value: '',
-      message: `Processing error: ${error}`
+      message: error instanceof Error ? error.message : `Processing error: ${error}`
     });
   }
 
@@ -400,16 +441,12 @@ function parseCSVRow(row: string): string[] {
   return result;
 }
 
-function buildHeaderMap(headers: string[]): Record<string, number> {
-  const map: Record<string, number> = {};
-  headers.forEach((header, index) => {
-    map[header.trim()] = index;
-  });
-  return map;
-}
-
-function fieldValue(fields: string[], headerMap: Record<string, number>, header: string): string {
-  const index = headerMap[header];
+function fieldValue(
+  fields: string[],
+  fieldMap: Partial<Record<LogicalHeaderField, number>>,
+  field: LogicalHeaderField
+): string {
+  const index = fieldMap[field];
   if (index === undefined) {
     return '';
   }
@@ -418,7 +455,7 @@ function fieldValue(fields: string[], headerMap: Record<string, number>, header:
 
 function mapFieldsToNormalized(
   fields: string[],
-  headerMap: Record<string, number>,
+  fieldMap: Partial<Record<LogicalHeaderField, number>>,
   format: CitiBankImportFormat,
   sourceRowNumber: number
 ): NormalizedCitiBankRow {
@@ -426,25 +463,25 @@ function mapFieldsToNormalized(
     return {
       format,
       sourceRowNumber,
-      accountNumber: fieldValue(fields, headerMap, 'Account Number'),
-      valueDate: fieldValue(fields, headerMap, 'Value Date'),
-      amount: fieldValue(fields, headerMap, 'Amount'),
-      customerReference: fieldValue(fields, headerMap, 'Customer Reference')
+      accountNumber: fieldValue(fields, fieldMap, 'accountNumber'),
+      valueDate: fieldValue(fields, fieldMap, 'valueDate'),
+      amount: fieldValue(fields, fieldMap, 'amount'),
+      customerReference: fieldValue(fields, fieldMap, 'customerReference')
     };
   }
 
   return {
     format,
     sourceRowNumber,
-    valueDate: fieldValue(fields, headerMap, 'Value Date'),
-    statementDate: fieldValue(fields, headerMap, 'Statement Date'),
-    amount: fieldValue(fields, headerMap, 'Amount'),
-    customerReference: fieldValue(fields, headerMap, 'Customer Reference'),
-    beneficiaryRemitter: fieldValue(fields, headerMap, 'Beneficiary/ Remitter'),
-    description: fieldValue(fields, headerMap, 'Description'),
-    narrative: fieldValue(fields, headerMap, 'Narrative'),
-    type: fieldValue(fields, headerMap, 'Type'),
-    bankReference: fieldValue(fields, headerMap, 'Bank Reference')
+    valueDate: fieldValue(fields, fieldMap, 'valueDate'),
+    statementDate: fieldValue(fields, fieldMap, 'statementDate'),
+    amount: fieldValue(fields, fieldMap, 'amount'),
+    customerReference: fieldValue(fields, fieldMap, 'customerReference'),
+    beneficiaryRemitter: fieldValue(fields, fieldMap, 'beneficiary'),
+    description: fieldValue(fields, fieldMap, 'description'),
+    narrative: fieldValue(fields, fieldMap, 'narrative'),
+    type: fieldValue(fields, fieldMap, 'transactionType'),
+    bankReference: fieldValue(fields, fieldMap, 'bankReference')
   };
 }
 
@@ -485,4 +522,22 @@ function getRowDescription(row: NormalizedCitiBankRow): string {
   }
 
   return row.customerReference.trim();
+}
+
+function findBestHeaderCandidateForError(lines: string[]): string[] {
+  let best: string[] = [];
+  let bestScore = -1;
+
+  for (const line of lines.slice(0, 30)) {
+    if (isMetadataRow(line)) continue;
+    const headers = parseCSVRow(line).map(normalizeHeader).filter(Boolean);
+    if (headers.length < 2) continue;
+    const score = headers.length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = headers;
+    }
+  }
+
+  return best;
 }

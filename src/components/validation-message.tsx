@@ -56,11 +56,11 @@ const ValidationMessage = forwardRef<HTMLDivElement, ValidationMessageProps>(fun
       <div className="mt-[2px]">{icon}</div>
       <div className="min-w-0 text-sm">
         {title && <div className={cn("font-semibold", style.title)}>{title}</div>}
-        <div className="break-words">{message}</div>
+        <div className="break-words whitespace-pre-wrap">{message}</div>
         {tips && tips.length > 0 && (
-          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs opacity-90">
+          <ul className="mt-2 list-disc space-y-2 pl-4 text-xs opacity-90">
             {tips.map((tip, i) => (
-              <li key={i}>{tip}</li>
+              <li key={i} className="whitespace-pre-wrap">{tip}</li>
             ))}
           </ul>
         )}

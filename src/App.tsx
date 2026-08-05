@@ -138,6 +138,8 @@ function App() {
       });
 
       if (!processingResult) {
+        // Defensive: processor should always return a result; never stay on step 2
+        setCurrentStep(3);
         return;
       }
 
@@ -175,6 +177,7 @@ function App() {
       setCurrentStep(3);
     } catch (error) {
       console.error('Processing failed:', error);
+      setCurrentStep(3);
     }
   }, [addSession, fileState, generateFilename, processFile, settings]);
 
@@ -190,8 +193,11 @@ function App() {
   const displayStep = useMemo(() => {
     if (isProcessing) return 2;
     if (isComplete && result?.success) return currentStep === 4 ? 4 : 3;
+    // Failed processing must leave the "Processing..." screen
+    if (isComplete && result && !result.success) return 3;
+    if (!isProcessing && errors.length > 0 && currentStep === 2) return 3;
     return currentStep;
-  }, [currentStep, isProcessing, isComplete, result]);
+  }, [currentStep, isProcessing, isComplete, result, errors.length]);
 
   const trackerProgress = useMemo(() => {
     if (isProcessing) {
@@ -349,14 +355,16 @@ function App() {
         )}
 
         {/* Step 3: Results and Download */}
-        {displayStep === 3 && isComplete && result && (
+        {displayStep === 3 && (result || errors.length > 0) && (
           <div className="space-y-6">
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Processing Complete</CardTitle>
+                <CardTitle className="text-lg">
+                  {result?.success ? "Processing Complete" : "Processing Failed"}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {result.success && (
+                {result?.success && (
                   <>
                     <ProcessingStats
                       processed={result.statistics.processedRows}
@@ -404,15 +412,26 @@ function App() {
                   </>
                 )}
 
-                {!result.success && (
-                  <ValidationMessage
-                    variant="error"
-                    icon={<AlertCircle className="h-5 w-5" aria-hidden="true" />}
-                    title="Processing Failed"
-                    message="There was an error processing your CSV file."
-                    tips={errors.slice(0, 3).map(e => e.message)}
-                    ariaLive="assertive"
-                  />
+                {(!result || !result.success) && (
+                  <div className="space-y-4">
+                    <ValidationMessage
+                      variant="error"
+                      icon={<AlertCircle className="h-5 w-5" aria-hidden="true" />}
+                      title="Processing Failed"
+                      message={
+                        errors[0]?.message ||
+                        result?.errors[0]?.message ||
+                        "There was an error processing your CSV file."
+                      }
+                      tips={(errors.length > 0 ? errors : result?.errors ?? [])
+                        .slice(1, 8)
+                        .map((e) => e.message)}
+                      ariaLive="assertive"
+                    />
+                    <Button onClick={reset} variant="outline">
+                      Try Another File
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>

@@ -79,6 +79,8 @@ export interface ValidationResult {
   isValid: boolean;
   errors: string[];
   warnings: string[];
+  /** Optional structured errors for richer UI / logging */
+  structuredErrors?: ValidationError[];
 }
 
 // Processing progress tracking
