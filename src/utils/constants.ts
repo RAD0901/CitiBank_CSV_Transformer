@@ -9,21 +9,34 @@ export const FILE_CONSTRAINTS: FileConstraints = {
 /**
  * Logical fields used by the transformer, with accepted CitiBank header aliases.
  * Extra columns not listed here are ignored during import.
+ * Transformation never depends on column position or exact layout.
  */
 export const HEADER_ALIASES = {
   amount: ['Amount', 'Transaction Amount'],
   beneficiary: ['Beneficiary/ Remitter', 'Beneficiary/ Remitter Name'],
   customerReference: ['Customer Reference', 'Customer Reference Number'],
   description: ['Description', 'Transaction Description'],
+  paymentDetails: ['Payment Details'],
   transactionType: ['Type', 'Product Type'],
   narrative: ['Narrative'],
   statementDate: ['Statement Date'],
   valueDate: ['Value Date'],
   accountNumber: ['Account Number'],
+  accountName: ['Account Name'],
   bankReference: ['Bank Reference']
 } as const;
 
 export type LogicalHeaderField = keyof typeof HEADER_ALIASES;
+
+/** Exact Transaction Description values used by debit description rules. */
+export const DESCRIPTION_RULES = {
+  INCOMING_DIRECT_DEBIT: 'INCOMING DIRECT DEBIT',
+  /** Legacy debit-order rejection wording still supported. */
+  EFT_DIRECT_DEBIT_RETURNED: 'EFT DIRECT DEBIT RETURNED',
+  MONTHLY_CASH_BILLING: 'MONTHLY CASH BILLING INVOICE PAID',
+  TARGET_BALANCING_SWEEP: 'TARGET BALANCING SWEEP (EOD)',
+  INTERNAL_CUSTOMER_REFERENCE: '820 0201523001'
+} as const;
 
 /** @deprecated Prefer HEADER_ALIASES / field-based detection. Kept for reference. */
 export const LEGACY_REQUIRED_HEADERS = [
@@ -52,8 +65,9 @@ export const LEGACY_REQUIRED_FIELDS: readonly LogicalHeaderField[] = [
 ];
 
 /**
- * Logical fields required to recognize a newer / latest CitiBank export.
+ * Logical fields required to recognize newer / latest CitiBank exports.
  * Date may be Value Date and/or Statement Date (checked separately).
+ * Payment Details is optional for recognition so older new-format files still match.
  */
 export const NEW_REQUIRED_FIELDS: readonly LogicalHeaderField[] = [
   'amount',
@@ -80,6 +94,11 @@ export const ERROR_MESSAGES = {
   INVALID_AMOUNT_FORMAT: 'Amount must be a valid number',
   MISSING_REQUIRED_FIELD: 'Required field is missing or empty',
   MALFORMED_CSV: 'CSV file is malformed or corrupted',
+  MISSING_TRANSACTION_AMOUNT: 'Missing Transaction Amount.',
+  MISSING_DATE_FIELDS: 'Missing date fields. Provide Statement Date or Value Date.',
+  MISSING_PAYMENT_DETAILS: 'Missing Payment Details for credit transaction.',
+  MISSING_NARRATIVE: 'Missing Narrative when Narrative is required.',
+  MISSING_TRANSACTION_DESCRIPTION: 'Missing Transaction Description.',
   DEBIT_ORDER_MISSING_NARRATIVE: 'Debit order rejection row missing Narrative.',
   PROCESSING_FAILED: 'There was an error processing your CSV file.'
 } as const;
@@ -121,10 +140,12 @@ export const LOGICAL_FIELD_LABELS: Record<LogicalHeaderField, string> = {
   beneficiary: 'Beneficiary/ Remitter',
   customerReference: 'Customer Reference',
   description: 'Description',
+  paymentDetails: 'Payment Details',
   transactionType: 'Type',
   narrative: 'Narrative',
   statementDate: 'Statement Date',
   valueDate: 'Value Date',
   accountNumber: 'Account Number',
+  accountName: 'Account Name',
   bankReference: 'Bank Reference'
 };

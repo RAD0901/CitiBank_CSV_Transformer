@@ -13,7 +13,13 @@ import {
   formatUnsupportedFormatMessage,
   normalizeHeader
 } from './fileValidator';
-import { ERROR_MESSAGES, DATE_FORMATS, METADATA_INDICATORS, type LogicalHeaderField } from './constants';
+import {
+  ERROR_MESSAGES,
+  DATE_FORMATS,
+  METADATA_INDICATORS,
+  DESCRIPTION_RULES,
+  type LogicalHeaderField
+} from './constants';
 
 /**
  * Parses CitiBank CSV content and extracts transaction data
@@ -32,6 +38,7 @@ export function parseCitiBankCSV(csvContent: string): NormalizedCitiBankRow[] {
   // Extract data rows
   const dataRows = lines.slice(headerRowIndex + 1);
   const fieldMap = buildLogicalFieldMap(headers);
+  const hasPaymentDetailsColumn = fieldMap.paymentDetails !== undefined;
 
   // Transform rows to objects
   const transactions: NormalizedCitiBankRow[] = [];
@@ -44,7 +51,8 @@ export function parseCitiBankCSV(csvContent: string): NormalizedCitiBankRow[] {
       fields,
       fieldMap,
       format as CitiBankImportFormat,
-      headerRowIndex + dataRowIndex + 2
+      headerRowIndex + dataRowIndex + 2,
+      hasPaymentDetailsColumn
     );
 
     const hasAmount = Boolean(transaction.amount);
@@ -155,7 +163,7 @@ export function transformRow(
   row: NormalizedCitiBankRow,
   options: ProcessingOptions = {}
 ): SageBankTransaction {
-  const description = getRowDescription(row);
+  const description = getOutputDescription(row);
   const sourceDate = row.format === 'new' ? (row.statementDate || row.valueDate) : row.valueDate;
 
   return {
@@ -166,72 +174,213 @@ export function transformRow(
 }
 
 /**
+ * Centralized Sage output Description resolver.
+ *
+ * Legacy format:
+ *   Customer Reference
+ *
+ * New / latest format — credits (amount > 0):
+ *   1. Payment Details
+ *   2. Compatibility fallbacks when Payment Details is blank
+ *
+ * New / latest format — debits (amount < 0):
+ *   1. Beneficiary / Remitter Name
+ *   2. INCOMING DIRECT DEBIT (or legacy EFT DIRECT DEBIT RETURNED) → Narrative
+ *   3. MONTHLY CASH BILLING INVOICE PAID → Transaction Description
+ *   4. TARGET BALANCING SWEEP (EOD) → Narrative (fallback Description for older files)
+ *   5. Fallback → Transaction Description
+ */
+export function getOutputDescription(row: NormalizedCitiBankRow): string {
+  if (row.format === 'legacy') {
+    return (row.customerReference ?? '').trim();
+  }
+
+  const paymentDetails = (row.paymentDetails ?? '').trim();
+  const beneficiary = (row.beneficiaryRemitter ?? '').trim();
+  const description = (row.description ?? '').trim();
+  const narrative = (row.narrative ?? '').trim();
+  const customerReference = (row.customerReference ?? '').trim();
+
+  if (!isPaymentRow(row.amount)) {
+    // CREDITS (positive / zero)
+    if (paymentDetails) {
+      return paymentDetails;
+    }
+
+    // TARGET BALANCING credits often have blank Payment Details; use Narrative.
+    if (description === DESCRIPTION_RULES.TARGET_BALANCING_SWEEP && narrative) {
+      return narrative;
+    }
+
+    // Older new-format files without Payment Details column
+    if (customerReference === DESCRIPTION_RULES.INTERNAL_CUSTOMER_REFERENCE) {
+      return description;
+    }
+    if (customerReference) {
+      return customerReference;
+    }
+    return description;
+  }
+
+  // DEBITS (negative)
+  if (beneficiary) {
+    return beneficiary;
+  }
+
+  if (
+    description === DESCRIPTION_RULES.INCOMING_DIRECT_DEBIT ||
+    description === DESCRIPTION_RULES.EFT_DIRECT_DEBIT_RETURNED
+  ) {
+    return narrative;
+  }
+
+  if (description === DESCRIPTION_RULES.MONTHLY_CASH_BILLING) {
+    return description;
+  }
+
+  if (description === DESCRIPTION_RULES.TARGET_BALANCING_SWEEP) {
+    // Prefer Narrative (latest exports); fall back to Description for older files
+    return narrative || description;
+  }
+
+  return description;
+}
+
+/**
  * Validates a single CitiBank transaction row
  */
 export function validateRow(row: NormalizedCitiBankRow, rowNumber: number): ValidationError[] {
   const errors: ValidationError[] = [];
-  const fieldsToValidate: Record<string, string> = {
-    Amount: row.amount
-  };
 
-  if (row.format === 'legacy') {
-    fieldsToValidate['Value Date'] = row.valueDate;
-    fieldsToValidate['Customer Reference'] = row.customerReference;
-    fieldsToValidate['Account Number'] = row.accountNumber || '';
+  if (!row.amount?.trim()) {
+    errors.push({
+      row: rowNumber,
+      field: 'Amount',
+      value: row.amount || '',
+      message: `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_TRANSACTION_AMOUNT}`
+    });
   } else {
-    // Prefer Statement Date, fall back to Value Date (same as transform)
-    const dateSource = row.statementDate || row.valueDate;
-    const dateFieldLabel = row.statementDate ? 'Statement Date' : 'Value Date';
-    fieldsToValidate[dateFieldLabel] = dateSource || '';
-    fieldsToValidate['Customer Reference'] = row.customerReference;
-    // Description / Beneficiary are validated via derived description rules below —
-    // do not fail solely because one optional alias column is empty.
+    validateFieldValue('Amount', row.amount, rowNumber).forEach(errorMessage => {
+      errors.push({ row: rowNumber, field: 'Amount', value: row.amount, message: errorMessage });
+    });
   }
 
-  Object.entries(fieldsToValidate).forEach(([field, value]) => {
-    validateFieldValue(field, value, rowNumber).forEach(errorMessage => {
-      errors.push({ row: rowNumber, field, value, message: errorMessage });
+  if (row.format === 'legacy') {
+    validateFieldValue('Value Date', row.valueDate, rowNumber).forEach(errorMessage => {
+      errors.push({ row: rowNumber, field: 'Value Date', value: row.valueDate, message: errorMessage });
     });
-  });
+    validateFieldValue('Customer Reference', row.customerReference, rowNumber).forEach(errorMessage => {
+      errors.push({
+        row: rowNumber,
+        field: 'Customer Reference',
+        value: row.customerReference,
+        message: errorMessage
+      });
+    });
+    validateFieldValue('Account Number', row.accountNumber || '', rowNumber).forEach(errorMessage => {
+      errors.push({
+        row: rowNumber,
+        field: 'Account Number',
+        value: row.accountNumber || '',
+        message: errorMessage
+      });
+    });
 
-  if (row.format === 'legacy' && row.customerReference.trim().length === 0) {
+    if (row.customerReference.trim().length === 0) {
+      errors.push({
+        row: rowNumber,
+        field: 'Customer Reference',
+        value: row.customerReference,
+        message: `Row ${rowNumber}: Description cannot be empty`
+      });
+    }
+
+    return errors;
+  }
+
+  // New / latest format
+  const dateSource = row.statementDate || row.valueDate;
+  if (!dateSource?.trim()) {
+    errors.push({
+      row: rowNumber,
+      field: 'Statement Date|Value Date',
+      value: '',
+      message: `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_DATE_FIELDS}`
+    });
+  } else {
+    const dateFieldLabel = row.statementDate ? 'Statement Date' : 'Value Date';
+    validateFieldValue(dateFieldLabel, dateSource, rowNumber).forEach(errorMessage => {
+      errors.push({ row: rowNumber, field: dateFieldLabel, value: dateSource, message: errorMessage });
+    });
+  }
+
+  validateFieldValue('Customer Reference', row.customerReference, rowNumber).forEach(errorMessage => {
     errors.push({
       row: rowNumber,
       field: 'Customer Reference',
       value: row.customerReference,
-      message: 'Description cannot be empty'
+      message: errorMessage
+    });
+  });
+
+  const description = (row.description ?? '').trim();
+  const beneficiary = (row.beneficiaryRemitter ?? '').trim();
+  const narrative = (row.narrative ?? '').trim();
+  const paymentDetails = (row.paymentDetails ?? '').trim();
+  const isDebit = isPaymentRow(row.amount);
+  const needsNarrative =
+    isDebit &&
+    !beneficiary &&
+    (
+      description === DESCRIPTION_RULES.INCOMING_DIRECT_DEBIT ||
+      description === DESCRIPTION_RULES.EFT_DIRECT_DEBIT_RETURNED ||
+      (description === DESCRIPTION_RULES.TARGET_BALANCING_SWEEP && row.hasPaymentDetailsColumn)
+    );
+
+  if (!description && isDebit && !beneficiary) {
+    errors.push({
+      row: rowNumber,
+      field: 'Description',
+      value: '',
+      message: `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_TRANSACTION_DESCRIPTION}`
     });
   }
 
-  if (row.format === 'new') {
-    const isDebitOrderRejection = isDebitOrderRejectionRow(row);
-    const isPayment = isPaymentRow(row.amount);
-    const isReceiptInternalRef = !isPayment && row.customerReference.trim() === '820 0201523001';
-    const derivedDescription = getRowDescription(row);
-    if (!derivedDescription) {
+  if (needsNarrative && !narrative) {
+    errors.push({
+      row: rowNumber,
+      field: 'Narrative',
+      value: narrative,
+      message: `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_NARRATIVE}\n\n${ERROR_MESSAGES.DEBIT_ORDER_MISSING_NARRATIVE}`
+    });
+  }
+
+  const derivedDescription = getOutputDescription(row);
+  if (!derivedDescription) {
+    if (!isDebit && row.hasPaymentDetailsColumn && !paymentDetails) {
       errors.push({
         row: rowNumber,
-        field: isDebitOrderRejection
-          ? 'Narrative'
-          : isPayment
-          ? 'Beneficiary/ Remitter|Description'
-          : isReceiptInternalRef
-            ? 'Description'
-            : 'Customer Reference',
-        value: isDebitOrderRejection
-          ? (row.narrative || '')
-          : isPayment
-          ? `${row.beneficiaryRemitter || ''}|${row.description || ''}`
-          : isReceiptInternalRef
-            ? (row.description || '')
-            : row.customerReference,
-        message: isDebitOrderRejection
-          ? `${ERROR_MESSAGES.DEBIT_ORDER_MISSING_NARRATIVE}\n\nRow ${rowNumber}`
-          : isPayment
-          ? 'Payment rows require Beneficiary/ Remitter or Description'
-          : isReceiptInternalRef
-            ? 'Receipt/Deposit rows with Customer Reference 820 0201523001 require Description'
-            : 'Receipt/Deposit rows require Customer Reference'
+        field: 'Payment Details',
+        value: paymentDetails,
+        message: `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_PAYMENT_DETAILS}`
+      });
+    } else if (isDebit && !beneficiary && !description) {
+      errors.push({
+        row: rowNumber,
+        field: 'Description',
+        value: '',
+        message: `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_TRANSACTION_DESCRIPTION}`
+      });
+    } else if (needsNarrative) {
+      // Already reported above
+    } else {
+      errors.push({
+        row: rowNumber,
+        field: isDebit ? 'Beneficiary/ Remitter|Description' : 'Payment Details',
+        value: isDebit ? `${beneficiary}|${description}` : paymentDetails,
+        message: isDebit
+          ? `Row ${rowNumber}: Payment rows require Beneficiary/ Remitter or Transaction Description`
+          : `Row ${rowNumber}: ${ERROR_MESSAGES.MISSING_PAYMENT_DETAILS}`
       });
     }
   }
@@ -322,7 +471,7 @@ export function processCSVData(csvContent: string, options: ProcessingOptions = 
           row: rowNumber,
           field: 'transformation',
           value: JSON.stringify(transaction),
-          message: `Transformation error: ${error}`
+          message: `Row ${rowNumber}: Transformation error: ${error}`
         });
         result.statistics.errorRows++;
         if (shouldStopOnError) {
@@ -457,7 +606,8 @@ function mapFieldsToNormalized(
   fields: string[],
   fieldMap: Partial<Record<LogicalHeaderField, number>>,
   format: CitiBankImportFormat,
-  sourceRowNumber: number
+  sourceRowNumber: number,
+  hasPaymentDetailsColumn: boolean
 ): NormalizedCitiBankRow {
   if (format === 'legacy') {
     return {
@@ -466,7 +616,8 @@ function mapFieldsToNormalized(
       accountNumber: fieldValue(fields, fieldMap, 'accountNumber'),
       valueDate: fieldValue(fields, fieldMap, 'valueDate'),
       amount: fieldValue(fields, fieldMap, 'amount'),
-      customerReference: fieldValue(fields, fieldMap, 'customerReference')
+      customerReference: fieldValue(fields, fieldMap, 'customerReference'),
+      hasPaymentDetailsColumn: false
     };
   }
 
@@ -479,49 +630,23 @@ function mapFieldsToNormalized(
     customerReference: fieldValue(fields, fieldMap, 'customerReference'),
     beneficiaryRemitter: fieldValue(fields, fieldMap, 'beneficiary'),
     description: fieldValue(fields, fieldMap, 'description'),
+    paymentDetails: fieldValue(fields, fieldMap, 'paymentDetails'),
     narrative: fieldValue(fields, fieldMap, 'narrative'),
     type: fieldValue(fields, fieldMap, 'transactionType'),
-    bankReference: fieldValue(fields, fieldMap, 'bankReference')
+    bankReference: fieldValue(fields, fieldMap, 'bankReference'),
+    accountNumber: fieldValue(fields, fieldMap, 'accountNumber'),
+    accountName: fieldValue(fields, fieldMap, 'accountName'),
+    hasPaymentDetailsColumn
   };
 }
 
 function isPaymentRow(amount: string): boolean {
-  const transformed = transformAmount(amount);
-  return parseFloat(transformed) < 0;
-}
-
-function isDebitOrderRejectionRow(row: NormalizedCitiBankRow): boolean {
-  return (
-    row.format === 'new' &&
-    isPaymentRow(row.amount) &&
-    (row.description?.trim() ?? '') === 'EFT DIRECT DEBIT RETURNED'
-  );
-}
-
-function getRowDescription(row: NormalizedCitiBankRow): string {
-  if (row.format === 'legacy') {
-    return row.customerReference.trim();
+  try {
+    const transformed = transformAmount(amount);
+    return parseFloat(transformed) < 0;
+  } catch {
+    return false;
   }
-
-  if (isDebitOrderRejectionRow(row)) {
-    return row.narrative?.trim() ?? '';
-  }
-
-  if (isPaymentRow(row.amount)) {
-    const beneficiary = row.beneficiaryRemitter?.trim() ?? '';
-    if (beneficiary) {
-      return beneficiary;
-    }
-    return row.description?.trim() ?? '';
-  }
-
-  // Receipts/deposits override:
-  // when Citi internal reference is present, use Description instead.
-  if (row.customerReference.trim() === '820 0201523001') {
-    return row.description?.trim() ?? '';
-  }
-
-  return row.customerReference.trim();
 }
 
 function findBestHeaderCandidateForError(lines: string[]): string[] {

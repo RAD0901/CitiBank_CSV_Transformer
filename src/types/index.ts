@@ -25,15 +25,19 @@ export interface NormalizedCitiBankRow {
   format: CitiBankImportFormat;
   sourceRowNumber: number;
   accountNumber?: string;
+  accountName?: string;
   valueDate: string;
   statementDate?: string;
   amount: string;
   customerReference: string;
   beneficiaryRemitter?: string;
   description?: string;
+  paymentDetails?: string;
   narrative?: string;
   type?: string;
   bankReference?: string;
+  /** True when the source CSV included a Payment Details column (any alias). */
+  hasPaymentDetailsColumn?: boolean;
 }
 
 // Sage Bank Manager output structure  
